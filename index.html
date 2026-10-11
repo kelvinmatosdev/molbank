@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Molbank Química</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="stylesheet" href="molbank.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- LOGIN -->
+  <div class="screen active" id="screen-login">
+  <div class="login-inner">
+    <div class="brand">
+      <div class="brand-mark"><div class="orbit"></div><div class="orbit"></div><div class="core"></div><div class="e"></div><div class="e2"></div></div>
+      <h1>Molbank</h1>
+      <p>A química perfeita entre aprender e conquistar.</p>
+    </div>
+
+    <div class="role-pick" id="rolePick">
+      <button class="selected" data-role="aluno" onclick="pickRole('aluno')">🎓 Sou aluno</button>
+      <button data-role="professor" onclick="pickRole('professor')">🧑‍🏫 Sou professor</button>
+    </div>
+
+    <div class="field">
+      <label>Nome completo</label>
+      <input type="text" id="loginName" placeholder="Seu nome completo" oninput="clearFieldError('loginName')">
+      <div class="field-error" id="loginNameError">Preenche seu nome completo pra continuar.</div>
+    </div>
+
+    <!-- ALUNO: entrar em sala -->
+    <div id="alunoJoinArea">
+      <div class="field">
+        <label>Código da sala</label>
+        <input type="text" id="loginRoomCode" placeholder="Ex: XXXXXX" style="text-transform:uppercase;" oninput="clearFieldError('loginRoomCode')">
+        <div class="field-error" id="loginRoomCodeError">Digita o código da sala, ou marca a opção abaixo.</div>
+      </div>
+      <label class="skip-check">
+        <input type="checkbox" id="skipRoomCheck" onchange="toggleSkipRoom()">
+        <span>Entrar sem uma turma por enquanto</span>
+      </label>
+    </div>
+
+    <button class="btn btn-primary" onclick="login()">Entrar no Molbank</button>
+    <p class="switch-mode">Protótipo de demonstração — <b onclick="fillDemo()">preencher exemplo</b></p>
+  </div>
+  </div>
+
+  <!-- STUDENT HOME -->
+  <div class="screen" id="screen-home">
+    <div class="topbar">
+      <div class="greeting"><p>Olá,</p><h2 id="studentGreetName">Aluno</h2></div>
+      <div class="avatar" id="studentAvatar" onclick="goTo('perfil')">A</div>
+    </div>
+    <div class="content" id="homeContent">
+      <div id="homeNoRoom" style="display:none; text-align:center; padding:36px 8px;">
+        <div style="font-size:34px; margin-bottom:12px;">🏫</div>
+        <p style="font-size:14px; font-weight:600; margin-bottom:6px;">Você ainda não está em nenhuma turma</p>
+        <p style="font-size:12.5px; color:var(--gray); margin-bottom:18px; line-height:1.5;">Toca no botão + aqui embaixo e digita o código que o professor da turma te passou.</p>
+        <button class="btn btn-primary" style="max-width:220px; margin:0 auto;" onclick="openJoinModal()">Entrar em uma sala</button>
+      </div>
+      <div id="homeWithRoom">
+        <div class="balance-card" style="cursor:pointer;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:1;">
+            <div class="balance-label"><span class="coin-dot"></span> Saldo de mol-edas</div>
+            <button class="corner-btn" onclick="event.stopPropagation(); goTo('notas')" style="background:rgba(255,255,255,.18); color:#fff;">Ver notas</button>
+          </div>
+          <div class="balance-value" id="homeBalance">0<span>mol</span></div>
+          <div class="balance-sub">
+            <div>Posição na turma<strong id="homeRankPos">—</strong></div>
+            <div>Nota atual<strong id="homeNota">—</strong></div>
+            <div>Turma<strong id="homeRoomName">—</strong></div>
+          </div>
+        </div>
+
+        <div class="section-title">Avisos</div>
+        <div id="studentAvisosCard" style="margin-bottom:20px;"></div>
+
+        <div class="section-title">Por categoria</div>
+        <div class="cat-grid" id="catGrid"></div>
+
+        <div class="quick-grid">
+          <div class="quick-item" onclick="goTo('ranking')"><div class="ic">🏆</div><span>Ranking</span></div>
+          <div class="quick-item" onclick="goTo('loja')"><div class="ic">🛍️</div><span>Loja</span></div>
+          <div class="quick-item" onclick="goTo('missao')"><div class="ic">🎯</div><span>Missão</span><span class="badge" id="missionBadge" style="display:none;">!</span></div>
+          <div class="quick-item" onclick="goTo('perfil')"><div class="ic">👤</div><span>Perfil</span></div>
+        </div>
+
+        <div class="section-title">Últimos lançamentos</div>
+        <div id="activityList"></div>
+      </div>
+    </div>
+    <button id="joinFab" onclick="openJoinModal()" style="position:absolute; right:16px; bottom:86px; width:42px; height:42px; border-radius:50%; background:var(--orange); color:#fff; border:none; font-size:20px; font-weight:700; box-shadow:0 6px 16px rgba(46,196,182,.4); cursor:pointer; z-index:15;">+</button>
+    <div class="bottomnav" id="navStudent"></div>
+  </div>
+
+  <!-- MODAL: entrar em sala -->
+  <div id="joinModalOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:40; align-items:flex-end; justify-content:center;">
+    <div id="joinModalSheet" style="background:var(--surface); color:var(--text-primary); width:100%; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom));">
+      <div id="joinModalHandle" style="padding:10px 0; margin-bottom:6px; cursor:grab; display:flex; justify-content:center;"><div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px;"></div></div>
+      <p style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; margin-bottom:4px;">Entrar em uma turma</p>
+      <p style="font-size:12.5px; color:var(--gray); margin-bottom:14px;">Peça o código ao professor da turma.</p>
+      <input type="text" id="joinModalInput" placeholder="Ex: MOLQ42" style="width:100%; padding:13px 15px; border-radius:14px; border:1px solid var(--gray-light); font-size:14.5px; font-family:inherit; text-transform:uppercase; margin-bottom:12px;">
+      <button class="btn btn-outline" style="margin-bottom:10px; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="openQrScanner()"><svg width="1.1em" height="1.1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg> Ler QR Code</button>
+      <button class="btn btn-primary" onclick="confirmJoinModal()">Entrar</button>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="closeJoinModal()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- SCANNER DE QR CODE -->
+  <div id="qrScannerOverlay" style="display:none; position:absolute; inset:0; background:#000; z-index:50; flex-direction:column;">
+    <video id="qrVideo" autoplay playsinline muted style="flex:1; width:100%; object-fit:cover;"></video>
+    <canvas id="qrCanvas" style="display:none;"></canvas>
+    <div style="position:absolute; top:0; left:0; right:0; padding:18px 20px; display:flex; justify-content:space-between; align-items:center;">
+      <p style="color:#fff; font-weight:600; font-size:13px;">Aponte pro QR code da sala</p>
+      <button onclick="closeQrScanner()" style="background:rgba(255,255,255,.15); color:#fff; border:none; width:34px; height:34px; border-radius:50%; font-size:16px; cursor:pointer;">✕</button>
+    </div>
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:220px; height:220px; border:2.5px solid var(--orange); border-radius:18px; pointer-events:none;"></div>
+  </div>
+
+  <!-- NOTAS (aluno) -->
+  <!-- AVISOS: lista completa -->
+  <div class="screen" id="screen-avisos">
+    <div class="topbar">
+      <div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goBackFromAvisos()">‹ Voltar</a></p><h2>Avisos</h2></div>
+      <button id="criarAvisoBtn" onclick="openAvisoForm(null)" style="display:none; background:var(--orange); color:#fff; border:none; padding:8px 14px; border-radius:11px; font-family:inherit; font-weight:700; font-size:12px; cursor:pointer;">+ Criar</button>
+    </div>
+    <div class="content" id="avisosListaContent"></div>
+    <div class="bottomnav" id="navAvisos"></div>
+  </div>
+
+  <div class="screen" id="screen-notas">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('home')">‹ Início</a></p><h2>Minhas notas</h2></div></div>
+    <div class="content" id="notasContent"></div>
+    <div class="bottomnav" id="navNotas"></div>
+  </div>
+  <div class="screen" id="screen-ranking">
+    <div class="topbar"><div class="greeting"><p>Ranking</p><h2 id="rankRoomTitle">Sua turma</h2></div></div>
+    <div class="content"><div id="rankList"></div></div>
+    <div class="bottomnav" id="navRanking"></div>
+  </div>
+
+  <!-- STORE -->
+  <div class="screen" id="screen-loja">
+    <div class="topbar"><div class="greeting"><p>Você tem</p><h2 id="lojaBalance">0 mol-edas</h2></div></div>
+    <div class="content" id="lojaContent"></div>
+    <div class="bottomnav" id="navLoja"></div>
+  </div>
+
+  <!-- MISSÃO -->
+  <div class="screen" id="screen-missao">
+    <div class="topbar"><div class="greeting"><p>Recuperação</p><h2>Missão</h2></div></div>
+    <div class="content" id="missaoContent"></div>
+    <div class="bottomnav" id="navMissao"></div>
+  </div>
+
+  <!-- PERFIL (aluno) -->
+  <div class="screen" id="screen-perfil">
+    <div class="topbar">
+      <div class="greeting"><p>Você</p><h2>Meu perfil</h2></div>
+      <button onclick="goTo('config')" style="background:var(--gray-light); border:none; width:38px; height:38px; border-radius:50%; font-size:16px; cursor:pointer; color:var(--text-primary); display:flex; align-items:center; justify-content:center;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+    <div class="content">
+      <div class="profile-avatar-big" id="profileAvatar">A</div>
+      <div class="profile-field"><label>Nome completo</label><input type="text" id="profileNameInput"></div>
+      <button class="btn btn-dark" onclick="saveProfile()" style="margin-bottom:20px;">Salvar alterações</button>
+
+      <div class="section-title">Minhas turmas <a onclick="openJoinModal()">+ entrar em outra</a></div>
+      <div id="profileRoomList" style="margin-bottom:20px;"></div>
+    </div>
+    <div class="bottomnav" id="navPerfil"></div>
+  </div>
+
+  <!-- SOBRE O MOLBANK -->
+  <!-- CONFIGURAÇÕES (compartilhada entre aluno e professor) -->
+  <div class="screen" id="screen-config">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goBackFromConfig()">‹ Perfil</a></p><h2>Configurações</h2></div></div>
+    <div class="content">
+      <div class="settings-row" onclick="toggleTheme()"><div class="ic" id="themeIcon">🌗</div><div class="lbl">Tema</div><div class="tag" id="themeTag">Claro</div></div>
+      <div class="settings-row disabled"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></div><div class="lbl">Notificações</div><div class="tag">Em breve</div></div>
+      <div class="settings-row" onclick="goTo('sobre')"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 11h1v5h1"/></svg></div><div class="lbl">Sobre o Molbank</div><div class="chevron">›</div></div>
+      <div class="settings-row danger" onclick="logoutToLogin()"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></div><div class="lbl">Sair da conta</div></div>
+    </div>
+    <div class="bottomnav" id="navConfig"></div>
+  </div>
+
+  <div class="screen" id="screen-sobre">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('config')">‹ Configurações</a></p><h2>Sobre o Molbank</h2></div></div>
+    <div class="content">
+      <div style="text-align:center; padding:20px 0 30px;">
+        <div class="brand-mark"><div class="orbit"></div><div class="orbit"></div><div class="core"></div><div class="e" style="background:var(--text-primary);"></div><div class="e2" style="background:var(--text-primary);"></div></div>
+        <p style="font-family:'Space Grotesk', sans-serif; font-size:20px; font-weight:700; margin-top:10px;">Molbank</p>
+        <p style="font-size:12px; color:var(--gray); margin-top:4px;">A química perfeita entre aprender e conquistar.</p>
+      </div>
+      <div class="profile-room-card" style="flex-direction:column; align-items:flex-start;">
+        <p style="font-size:13px; font-weight:600; margin-bottom:6px;">Versão do protótipo</p>
+        <span style="font-size:12px; color:var(--gray);">Em desenvolvimento — dados guardados só nesta sessão.</span>
+      </div>
+      <div class="profile-room-card" style="flex-direction:column; align-items:flex-start;">
+        <p style="font-size:13px; font-weight:600; margin-bottom:6px;">Créditos</p>
+        <span style="font-size:12px; color:var(--gray);">Em breve, com todo mundo que ajudou a construir o Molbank.</span>
+      </div>
+    </div>
+    <div class="bottomnav" id="navSobre"></div>
+  </div>
+
+  <!-- TEACHER: lista de turmas -->
+  <div class="screen" id="screen-teacher-rooms">
+    <div class="topbar">
+      <div class="greeting"><p>Professor(a)</p><h2 id="teacherGreetName2">Nome</h2></div>
+      <div class="avatar" id="teacherAvatar2" onclick="goTo('teacherPerfil')">B</div>
+    </div>
+    <div class="content">
+      <div class="create-room-card" onclick="openCreateRoom()">➕ Criar nova turma</div>
+      <div id="createRoomBox" style="display:none; margin-bottom:16px;">
+        <div class="field"><label>Nome da turma</label><input type="text" id="newRoomName" placeholder="Ex: Química — 2º A"></div>
+        <button class="btn btn-primary" onclick="createRoom()">Gerar código e criar</button>
+      </div>
+      <div class="section-title">Minhas turmas</div>
+      <div id="teacherRoomList"></div>
+    </div>
+    <div class="bottomnav" id="navTeacherRooms"></div>
+  </div>
+
+  <!-- TEACHER: RESUMO da turma -->
+  <div class="screen" id="screen-teacher">
+    <div class="topbar">
+      <div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="backToRooms()">‹ Minhas turmas</a></p><h2 id="teacherRoomName">Turma</h2></div>
+      <div class="avatar" id="teacherAvatar" onclick="goTo('teacherPerfil')">B</div>
+    </div>
+    <div class="content">
+      <div class="code-display" style="background:var(--gray-light); border-color:rgba(46,196,182,.7); display:flex; align-items:center; gap:14px; text-align:left;">
+        <div id="teacherRoomQR" onclick="openQrFullscreen()" style="width:64px; height:64px; border-radius:10px; background:#fff; flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; overflow:hidden;"></div>
+        <div style="flex:1;">
+          <span style="color:var(--gray); font-size:11px; display:block; margin-bottom:4px;">Código pra alunos entrarem</span>
+          <strong id="teacherRoomCodeBig" style="color:var(--orange); font-family:'Space Grotesk', sans-serif; font-size:22px; letter-spacing:.1em;">—</strong>
+        </div>
+        <button class="corner-btn" onclick="copyRoomCode()" style="flex-shrink:0;">Copiar</button>
+      </div>
+
+      <div class="balance-card">
+        <div class="balance-label"><span class="coin-dot"></span> Total em circulação</div>
+        <div class="balance-value" id="teacherTotal">0<span>mol</span></div>
+        <div class="balance-sub">
+          <div>Alunos<strong id="teacherStudentCount">0</strong></div>
+          <div>Missões pendentes<strong id="teacherPendingCount">0</strong></div>
+        </div>
+      </div>
+
+      <div class="section-title">Avisos da turma</div>
+      <div id="teacherAvisosCard" style="margin-bottom:20px;"></div>
+
+      <div class="section-title">Acesso rápido</div>
+      <div class="quick-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="quick-item" onclick="goTo('teacherStudents')"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/><path d="M22 9v6"/></svg></div><span>Alunos</span></div>
+        <div class="quick-item" onclick="goTo('teacherNotif')"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></div><span>Notificações</span><span class="badge" id="teacherNotifBadge" style="display:none;">!</span></div>
+        <div class="quick-item" onclick="goTo('teacherFreq')"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div><span>Frequência</span></div>
+      </div>
+
+      <div class="section-title">Fila de apresentações</div>
+      <div id="teacherMissionOrderResumo" style="margin-bottom:8px;"></div>
+    </div>
+    <div class="bottomnav" id="navTeacher"></div>
+  </div>
+
+  <!-- TEACHER: ALUNOS -->
+  <div class="screen" id="screen-teacher-students">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Alunos</h2></div></div>
+    <div class="content">
+      <div class="section-title">Importar dados <button class="corner-btn" onclick="toggleImport()" id="importToggle">Importar dados</button></div>
+      <div id="importBox" style="display:none; margin-bottom:18px;">
+        <p style="font-size:11.5px; color:var(--gray); margin-bottom:12px; line-height:1.5;">Importe as notas da turma por um arquivo <b>CSV</b> (.csv), planilha do <b>Excel</b> (.xlsx/.xls) ou <b>PDF</b> (.pdf). O Molbank analisa os dados automaticamente e mostra uma prévia antes de aplicar qualquer coisa. Funciona em qualquer escola, sem depender de sistema específico.</p>
+
+        <input type="file" id="importFileInput" accept=".csv,.xlsx,.xls,.pdf" style="display:none;" onchange="handleImportFile(event)">
+        <button class="btn btn-dark" style="margin-bottom:12px;" onclick="document.getElementById('importFileInput').click()">📁 Escolher arquivo</button>
+
+        <p style="font-size:10.5px; color:#B0B0B0; margin-bottom:14px; line-height:1.5;">⚠️ PDF funciona melhor em arquivos gerados por computador. Se for uma foto ou digitalização escaneada, pode não conseguir ler o texto.</p>
+
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+          <div style="flex:1; height:1px; background:var(--gray-light);"></div>
+          <span style="font-size:10.5px; color:var(--gray); font-weight:700;">OU COLAR TEXTO</span>
+          <div style="flex:1; height:1px; background:var(--gray-light);"></div>
+        </div>
+
+        <textarea id="importTextarea" placeholder="Aluno Exemplo 1,7.5&#10;Aluno Exemplo 2,4.2" style="width:100%; min-height:80px; border:1px solid var(--gray-light); border-radius:14px; padding:12px; font-family:monospace; font-size:12.5px; margin-bottom:8px; resize:vertical;"></textarea>
+        <button class="btn btn-outline" onclick="analisarTextoColado()">Analisar texto colado</button>
+      </div>
+
+      <!-- MODAL: prévia da importação -->
+      <div id="importPreviewOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:45; align-items:flex-end; justify-content:center;">
+        <div style="background:var(--surface); color:var(--text-primary); width:100%; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom)); max-height:80vh; overflow-y:auto;">
+          <div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px; margin:0 auto 16px;"></div>
+          <p style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; margin-bottom:4px;">Prévia da importação</p>
+          <p style="font-size:12px; color:var(--gray); margin-bottom:14px;" id="importPreviewSummary">—</p>
+          <div id="importPreviewList" style="margin-bottom:16px;"></div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-outline" style="flex:1;" onclick="closeImportPreview()">Cancelar</button>
+            <button class="btn btn-primary" style="flex:1; margin-top:0;" onclick="confirmImportPreview()">Confirmar importação</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">Todos os alunos <button class="corner-btn" onclick="toggleSelectMode()" id="selectModeToggle">Selecionar vários</button></div>
+      <div id="bulkActionBar" style="display:none; background:var(--black); border:1px solid rgba(255,255,255,.12); border-radius:16px; padding:14px; margin-bottom:12px;">
+        <p style="color:#fff; font-size:12.5px; font-weight:700; margin-bottom:12px;"><span id="bulkCount">0</span> aluno(s) selecionado(s)</p>
+
+        <p style="color:#7A7A7A; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; margin-bottom:7px;">Categoria</p>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px;" id="bulkCategoryChips"></div>
+
+        <div style="height:1px; background:#2E2E2E; margin-bottom:14px;"></div>
+
+        <p style="color:#7A7A7A; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; margin-bottom:7px;">Mol-edas nos selecionados</p>
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+          <button style="flex:1; background:rgba(63,182,95,.15); color:var(--green); border:none; padding:10px; border-radius:10px; font-family:inherit; font-weight:700; font-size:12.5px; cursor:pointer;" onclick="applyBulk(1)">+1 mol-eda</button>
+          <button style="flex:1; background:rgba(230,80,80,.15); color:var(--red); border:none; padding:10px; border-radius:10px; font-family:inherit; font-weight:700; font-size:12.5px; cursor:pointer;" onclick="applyBulk(-1)">−1 mol-eda</button>
+        </div>
+
+        <div style="height:1px; background:#2E2E2E; margin-bottom:14px;"></div>
+
+        <p style="color:#7A7A7A; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; margin-bottom:7px;">Ou aplicar sem selecionar</p>
+        <button style="width:100%; background:var(--orange); color:#fff; border:none; padding:10px; border-radius:10px; font-family:inherit; font-weight:700; font-size:12.5px; cursor:pointer;" onclick="applyBulkToAll()">+1 mol-eda pra turma inteira</button>
+      </div>
+      <div id="teacherStudentList"></div>
+    </div>
+    <div class="bottomnav" id="navTeacherStudents"></div>
+  </div>
+
+  <!-- TEACHER: NOTIFICAÇÕES -->
+  <div class="screen" id="screen-teacher-notif">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Notificações</h2></div></div>
+    <div class="content"><div id="teacherMissionAlerts"></div></div>
+    <div class="bottomnav" id="navTeacherNotif"></div>
+  </div>
+
+  <!-- TEACHER: FREQUÊNCIA -->
+  <div class="screen" id="screen-teacher-freq">
+    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Chamada de hoje</h2></div></div>
+    <div class="content">
+      <p style="font-size:12px; color:var(--gray); margin-bottom:14px; line-height:1.5;">Toca em Presente ou Falta pra cada aluno. Presença dá +1 mol-eda, falta não justificada tira −2, igual a tabela combinada.</p>
+
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span id="freqProgressLabel" style="font-size:12px; font-weight:700; color:var(--text-primary);">0 de 0 alunos marcados</span>
+        </div>
+        <div style="background:var(--gray-light); border-radius:8px; height:8px; overflow:hidden;">
+          <div id="freqProgressBar" style="background:var(--orange); height:100%; width:0%; border-radius:8px; transition:width .25s ease;"></div>
+        </div>
+      </div>
+
+      <button class="btn btn-dark" style="margin-bottom:14px;" onclick="markAllPresente()">✅ Marcar todos como presentes</button>
+
+      <div id="teacherFreqList"></div>
+    </div>
+    <div class="bottomnav" id="navTeacherFreq"></div>
+  </div>
+
+  <!-- MODAL: perfil do professor -->
+  <!-- TEACHER: PERFIL (tela completa, igual a do aluno) -->
+  <div class="screen" id="screen-teacher-perfil">
+    <div class="topbar">
+      <div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Meu perfil</h2></div>
+      <button onclick="goTo('config')" style="background:var(--gray-light); border:none; width:38px; height:38px; border-radius:50%; font-size:16px; cursor:pointer; color:var(--text-primary); display:flex; align-items:center; justify-content:center;"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+    <div class="content">
+      <div class="profile-avatar-big" id="teacherProfileAvatarBig">P</div>
+      <div class="profile-field"><label>Nome completo</label><input type="text" id="teacherProfileNameInput"></div>
+      <button class="btn btn-dark" onclick="saveTeacherProfile()" style="margin-bottom:20px;">Salvar alterações</button>
+    </div>
+    <div class="bottomnav" id="navTeacherPerfil"></div>
+  </div>
+
+  <!-- MODAL: escolher qual nota aplicar o bônus -->
+  <!-- MODAL: confirmar exclusão de turma -->
+  <!-- MODAL: detalhe do aviso + comentários -->
+  <div id="avisoDetailOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:48; align-items:flex-end; justify-content:center;">
+    <div id="avisoDetailSheet" style="background:var(--surface); color:var(--text-primary); width:100%; height:82vh; border-radius:22px 22px 0 0; display:flex; flex-direction:column;">
+      <div id="avisoDetailHandle" style="flex-shrink:0; padding:14px 20px 0; cursor:grab;">
+        <div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px; margin:0 auto 14px;"></div>
+      </div>
+      <div style="flex-shrink:0; padding:0 20px 12px; border-bottom:1px solid var(--gray-light); display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div style="min-width:0;">
+          <p id="avisoDetailTitulo" style="font-size:15px; font-weight:700;">Título</p>
+          <p id="avisoDetailData" style="font-size:11px; color:var(--gray); margin-top:2px;">Data</p>
+        </div>
+        <button onclick="closeAvisoDetail()" style="background:var(--gray-light); border:none; width:32px; height:32px; border-radius:50%; color:var(--text-primary); font-size:15px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center;">✕</button>
+      </div>
+      <div id="avisoDetailContent" style="flex:1; overflow-y:auto; padding:16px 20px calc(20px + env(safe-area-inset-bottom));"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: criar/editar aviso -->
+  <div id="avisoFormOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:49; align-items:flex-end; justify-content:center;">
+    <div id="avisoFormSheet" style="background:var(--surface); color:var(--text-primary); width:100%; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom)); max-height:85vh; overflow-y:auto;">
+      <div id="avisoFormHandle" style="padding:0 0 10px; cursor:grab; display:flex; justify-content:center;"><div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px;"></div></div>
+      <p id="avisoFormTitleLabel" style="font-family:'Space Grotesk', sans-serif; font-size:15px; font-weight:600; margin-bottom:14px;">Criar aviso</p>
+      <div class="profile-field"><label>Título</label><input type="text" id="avisoFormTitulo" placeholder="Ex: Prova de Estequiometria"></div>
+      <div class="profile-field"><label>Mensagem</label><textarea id="avisoFormMensagem" placeholder="Escreve o aviso aqui..." style="width:100%; min-height:100px; padding:13px 15px; border-radius:14px; border:1.5px solid #CCCCCC; background:#FFFFFF; color:#161616; font-family:inherit; font-size:14px; resize:vertical;"></textarea></div>
+      <label style="display:flex; align-items:center; gap:9px; margin-bottom:18px; cursor:pointer;">
+        <input type="checkbox" id="avisoFormAllowComments" checked style="width:18px; height:18px; accent-color:var(--orange);">
+        <span style="font-size:13px;">Permitir comentários dos alunos</span>
+      </label>
+      <button class="btn btn-primary" onclick="saveAvisoForm()">Salvar aviso</button>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="closeAvisoForm()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- MODAL: confirmação genérica (excluir aviso/comentário) -->
+  <div id="genericConfirmOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.6); z-index:52; align-items:center; justify-content:center; padding:30px;">
+    <div style="background:var(--surface); color:var(--text-primary); border-radius:20px; padding:22px; width:100%; max-width:320px;">
+      <p id="genericConfirmTitle" style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:700; margin-bottom:8px;">Confirmar?</p>
+      <p id="genericConfirmMessage" style="font-size:12.5px; color:var(--gray); line-height:1.5; margin-bottom:18px;">Essa ação não pode ser desfeita.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-outline" style="flex:1;" onclick="closeGenericConfirm()">Cancelar</button>
+        <button style="flex:1; background:var(--red); color:#fff; border:none; border-radius:14px; font-family:inherit; font-weight:600; font-size:14.5px; cursor:pointer;" onclick="executeGenericConfirm()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="deleteRoomOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.6); z-index:50; align-items:center; justify-content:center; padding:30px;">
+    <div style="background:var(--surface); color:var(--text-primary); border-radius:20px; padding:22px; width:100%; max-width:320px;">
+      <p style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:700; margin-bottom:8px;">Excluir turma?</p>
+      <p style="font-size:12.5px; color:var(--gray); line-height:1.5; margin-bottom:6px;" id="deleteRoomWarning">Essa ação não pode ser desfeita.</p>
+      <p style="font-size:12.5px; color:var(--red); font-weight:600; margin-bottom:18px;">Todos os dados dessa turma (alunos, mol-edas, notas) serão apagados de vez.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-outline" style="flex:1;" onclick="closeDeleteRoom()">Cancelar</button>
+        <button style="flex:1; background:var(--red); color:#fff; border:none; border-radius:14px; font-family:inherit; font-weight:600; font-size:14.5px; cursor:pointer;" onclick="executeDeleteRoom()">Excluir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Ficha do Aluno (central de gerenciamento) -->
+  <div id="rewardsManagerOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:45; align-items:flex-end; justify-content:center;">
+    <div id="rewardsManagerSheet" style="background:var(--surface); color:var(--text-primary); width:100%; height:80vh; border-radius:22px 22px 0 0; display:flex; flex-direction:column;">
+      <div id="rewardsManagerHandle" style="flex-shrink:0; padding:14px 20px 0; cursor:grab;">
+        <div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px; margin:0 auto 14px;"></div>
+      </div>
+      <div style="flex-shrink:0; padding:0 20px 12px; border-bottom:1px solid var(--gray-light);">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="rank-avatar" id="studentCardAvatar" style="width:42px; height:42px; font-size:15px; flex-shrink:0;">A</div>
+          <div style="flex:1; min-width:0;">
+            <p style="font-size:14.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="studentCardName">Nome do aluno</p>
+            <p style="font-size:11px; color:var(--gray);" id="studentCardRoom">Turma</p>
+          </div>
+          <button onclick="closeRewardsManager()" style="background:var(--gray-light); border:none; width:32px; height:32px; border-radius:50%; color:var(--text-primary); font-size:15px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center;">✕</button>
+        </div>
+      </div>
+      <div id="studentCardContent" style="flex:1; overflow-y:auto; padding:16px 20px calc(20px + env(safe-area-inset-bottom));"></div>
+    </div>
+  </div>
+
+  <div id="notaPickerOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:40; align-items:flex-end; justify-content:center;">
+    <div id="notaPickerSheet" style="background:var(--surface); color:var(--text-primary); width:100%; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom)); max-height:70vh; overflow-y:auto;">
+      <div id="notaPickerHandle" style="padding:10px 0; margin-bottom:6px; cursor:grab; display:flex; justify-content:center;"><div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px;"></div></div>
+      <p id="notaPickerTitle" style="font-family:'Space Grotesk', sans-serif; font-size:15px; font-weight:600; margin-bottom:14px;">Aplicar em qual nota?</p>
+      <div id="notaPickerList"></div>
+      <button class="btn btn-outline" style="margin-top:6px;" onclick="closeNotaPicker()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- MODAL: escolher dia da apresentação -->
+  <div id="datePickerOverlay" style="display:none; position:absolute; inset:0; background:rgba(0,0,0,.55); z-index:40; align-items:flex-end; justify-content:center;">
+    <div id="datePickerSheet" style="background:#0A2932; width:100%; border-radius:22px 22px 0 0; padding:22px 20px calc(22px + env(safe-area-inset-bottom)); max-height:85vh; overflow-y:auto;">
+      <div id="datePickerHandle" style="padding:10px 0; margin-bottom:6px; cursor:grab; display:flex; justify-content:center;"><div style="width:36px; height:4px; background:#2A5560; border-radius:4px;"></div></div>
+      <p style="font-family:'Space Grotesk', sans-serif; font-size:15px; font-weight:600; margin-bottom:4px; color:#fff;">Escolhe o dia da apresentação</p>
+      <p style="font-size:11.5px; color:#9F9F9F; margin-bottom:18px;" id="datePickerSubtitle">Máx. 3 por dia.</p>
+
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <p id="calMonthLabel" style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; color:#fff; text-transform:capitalize;">Julho de 2026</p>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button onclick="calChangeMonth(-1)" style="width:34px; height:34px; border-radius:50%; border:none; background:#14424E; color:#fff; font-size:16px; cursor:pointer;">‹</button>
+          <button onclick="calChangeMonth(1)" style="width:34px; height:34px; border-radius:50%; border:none; background:#14424E; color:#fff; font-size:16px; cursor:pointer;">›</button>
+        </div>
+      </div>
+
+      <div id="calWeekdayRow" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:6px;"></div>
+      <div id="calGridWrapper" style="touch-action:pan-y;">
+        <div id="calGrid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:18px; transition:opacity .16s ease;"></div>
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <button class="btn" style="flex:1; background:transparent; color:#9F9F9F; border:1px solid #2A5560;" onclick="closeDatePicker()">Cancelar</button>
+        <button class="btn" style="flex:1; background:var(--orange); color:#fff;" id="calConfirmBtn" disabled onclick="confirmDatePicker()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- MODO DE TESTE — troca de visão sem precisar logar de novo -->
+  <button id="devToggleBtn" onclick="toggleDevPanel()" style="position:absolute; left:14px; bottom:86px; width:44px; height:44px; border-radius:50%; background:var(--black); color:var(--orange); border:2px solid var(--orange); font-size:18px; cursor:pointer; z-index:45; display:none; align-items:center; justify-content:center;">🔀</button>
+  <div id="devPanel" style="display:none; position:absolute; left:14px; bottom:136px; background:var(--black); border-radius:16px; padding:10px; z-index:46; max-width:230px; max-height:280px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.4);">
+    <p style="color:#B9B9B9; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; padding:4px 6px 8px;">Modo de teste · ver como</p>
+    <div id="devPanelList"></div>
+  </div>
+
+  <!-- QR CODE EM TELA CHEIA -->
+  <div id="qrFullscreenOverlay" style="display:none; position:absolute; inset:0; background:#fff; z-index:60; flex-direction:column; align-items:center; justify-content:center; padding:30px;" onclick="closeQrFullscreen()">
+    <p style="font-family:'Space Grotesk', sans-serif; font-size:15px; font-weight:600; margin-bottom:18px; color:var(--text-primary);" id="qrFullscreenRoomName">Turma</p>
+    <div id="qrFullscreenCode" style="width:min(70vw, 320px); height:min(70vw, 320px);"></div>
+    <p style="margin-top:20px; font-family:'Space Grotesk', sans-serif; font-size:24px; letter-spacing:.15em; color:var(--orange); font-weight:700;" id="qrFullscreenCodeText">—</p>
+    <p style="margin-top:14px; font-size:12px; color:var(--gray);">Toca em qualquer lugar pra fechar</p>
+  </div>
+</div>
+
+<script src="molbank.js"></script>
+</body>
+</html>
