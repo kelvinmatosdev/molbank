@@ -96,6 +96,40 @@ function getLatestNota(s){
 function logActivity(student, label, amount, icon){
   student.activity.unshift({ label, amount, pos: amount>=0, icon, ts: Date.now() });
   if(student.activity.length > 25) student.activity.pop();
+  persistTeacherProgress(student);
+}
+
+const progressWriteQueues = new Map();
+let progressSyncErrorShownAt = 0;
+
+function persistTeacherProgress(student, roomCode = state.teacherRoomCode){
+  const room = rooms[roomCode];
+  if(!student || state.role !== 'professor' || !state.uid || !room?.isCloud
+    || room.teacherUid !== state.uid || !student.uid) return;
+
+  const progress = {
+    coins: Math.max(0, Number(student.coins) || 0),
+    nota: Math.min(10, Math.max(0, Number(student.nota) || 0)),
+    notaHistory: Array.isArray(student.notaHistory) ? student.notaHistory : [],
+    categorias: student.categorias || {},
+    activity: Array.isArray(student.activity) ? student.activity.slice(0, 25) : [],
+    freqMarkedToday: student.freqMarkedToday || null,
+  };
+  const key = roomCode + ':' + student.uid;
+  const previous = progressWriteQueues.get(key) || Promise.resolve();
+  const write = previous.catch(()=>{}).then(async()=>{
+    const api = await firebaseApi();
+    await api.updateMemberProgress(roomCode, student.uid, progress);
+  });
+  progressWriteQueues.set(key, write);
+  write.catch(()=>{
+    if(Date.now() - progressSyncErrorShownAt > 5000){
+      progressSyncErrorShownAt = Date.now();
+      showToast('Não consegui salvar a alteração no Firebase. Confira a conexão e as regras.');
+    }
+  }).finally(()=>{
+    if(progressWriteQueues.get(key) === write) progressWriteQueues.delete(key);
+  });
 }
 
 function timeAgo(ts){
@@ -596,6 +630,7 @@ async function confirmJoinModal(){
       rooms[code] = cloudRoomToLocal(joined, state.uid);
       state.myRoomCodes = [...new Set([...(state.myRoomCodes || []), code])];
       state.roomCode = code;
+      watchCloudRoomProgress(code);
     } else if(rooms[code] && !rooms[code].isCloud){
       joinRoomByCode(code, state.name);
     } else {
@@ -837,8 +872,75 @@ function replaceCloudRooms(list, uid){
   (list || []).filter(Boolean).forEach(room=>{ rooms[room.code] = cloudRoomToLocal(room, uid); });
 }
 
+const cloudProgressSubscriptions = new Map();
+
+function stopCloudProgressSync(){
+  cloudProgressSubscriptions.forEach(unsubscribe=>unsubscribe());
+  cloudProgressSubscriptions.clear();
+}
+
+function stopCloudRoomProgressSync(code){
+  const unsubscribe = cloudProgressSubscriptions.get(code);
+  if(unsubscribe) unsubscribe();
+  cloudProgressSubscriptions.delete(code);
+}
+
+function refreshProgressView(code){
+  const activeScreen = document.querySelector('.screen.active')?.id;
+  if(state.role === 'professor' && state.teacherRoomCode === code){
+    if(activeScreen === 'screen-teacher-rooms') renderTeacherRooms();
+    else if(['screen-teacher','screen-teacher-students','screen-teacher-notif'].includes(activeScreen)){
+      renderTeacher();
+      if(rewardsManagerMatricula && document.getElementById('rewardsManagerOverlay').style.display === 'flex'){
+        renderStudentCard(rewardsManagerMatricula);
+      }
+    } else if(activeScreen === 'screen-teacher-freq') renderFrequencia();
+    return;
+  }
+
+  if(state.role !== 'aluno' || state.roomCode !== code) return;
+  if(activeScreen === 'screen-home') renderHome();
+  else if(activeScreen === 'screen-notas') renderNotas();
+  else if(activeScreen === 'screen-ranking') renderRanking();
+  else if(activeScreen === 'screen-loja') renderStore();
+  else if(activeScreen === 'screen-missao') renderMissao();
+}
+
+function watchCloudRoomProgress(code){
+  if(cloudProgressSubscriptions.has(code) || !rooms[code]?.isCloud || !window.molbankFirebase) return;
+  const api = window.molbankFirebase;
+  const unsubscribe = api.subscribeRoomMembers(code, memberRows=>{
+    const room = rooms[code];
+    if(!room?.isCloud) return;
+    const currentByUid = new Map(room.students.map(student=>[student.uid || student.matricula, student]));
+    room.students = memberRows.map(data=>{
+      const uid = data.uid || data.matricula;
+      const student = currentByUid.get(uid) || makeStudent(data.nome || 'Aluno', data.matricula || uid);
+      Object.assign(student, data);
+      student.uid = uid;
+      student.matricula = data.matricula || uid;
+      student.isMe = uid === state.uid;
+      return student;
+    });
+    refreshProgressView(code);
+  }, error=>{
+    cloudProgressSubscriptions.delete(code);
+    if(Date.now() - progressSyncErrorShownAt > 5000){
+      progressSyncErrorShownAt = Date.now();
+      showToast('A atualização em tempo real foi interrompida. Confira as regras do Firestore.');
+    }
+  });
+  cloudProgressSubscriptions.set(code, unsubscribe);
+}
+
+function startCloudProgressSync(){
+  stopCloudProgressSync();
+  (state.myRoomCodes || []).forEach(watchCloudRoomProgress);
+}
+
 async function finishFirebaseLogin(user, profile, requestedCode){
   if(!profile || !['aluno','professor'].includes(profile.role)) throw new Error('PROFILE_NOT_FOUND');
+  stopCloudProgressSync();
   state.uid = user.uid;
   state.email = user.email || '';
   state.name = profile.name || user.displayName || 'Usuário';
@@ -877,6 +979,7 @@ async function finishFirebaseLogin(user, profile, requestedCode){
     switchScreen('screen-home');
     buildNav('navStudent', 'home');
   }
+  startCloudProgressSync();
   setAuthMessage('');
 }
 
@@ -1021,6 +1124,7 @@ async function logoutToLogin(){
     showToast('Não consegui encerrar a sessão. Tente novamente.');
     return;
   }
+  stopCloudProgressSync();
   Object.keys(rooms).forEach(code=>{ if(rooms[code]?.isCloud) delete rooms[code]; });
   state.uid = '';
   state.email = '';
@@ -1670,6 +1774,7 @@ async function executeDeleteRoom(){
       const api = await firebaseApi();
       await api.deleteRoom(code);
     }
+    stopCloudRoomProgressSync(code);
     delete rooms[code];
     if(state.teacherRoomCode === code) state.teacherRoomCode = '';
     closeDeleteRoom();
@@ -1692,6 +1797,7 @@ async function createRoom(){
     const api = await firebaseApi();
     const room = await api.createRoom({ code, name, teacherName: state.teacherName });
     rooms[code] = cloudRoomToLocal(room, state.uid);
+    watchCloudRoomProgress(code);
     document.getElementById('newRoomName').value = '';
     document.getElementById('createRoomBox').style.display = 'none';
     renderTeacherRooms();
@@ -1721,7 +1827,10 @@ function renderFrequencia(){
     resetBtn.classList.add('pulse');
     resetBtn.style.color = '#fff';
     setTimeout(()=>{
-      room.students.forEach(s=>{ s.freqMarkedToday = null; });
+      room.students.forEach(s=>{
+        s.freqMarkedToday = null;
+        persistTeacherProgress(s, room.code);
+      });
       renderFrequencia();
       showToast('Chamada resetada');
     }, 260);

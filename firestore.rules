@@ -66,7 +66,24 @@ service cloud.firestore {
           ])
           && exists(/databases/$(database)/documents/rooms/$(roomCode));
 
-        allow update: if ownsRoom(roomCode);
+        allow update: if ownsRoom(roomCode)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'coins', 'nota', 'notaHistory', 'categorias', 'activity',
+            'freqMarkedToday', 'updatedAt'
+          ])
+          && request.resource.data.coins is number
+          && request.resource.data.coins >= 0
+          && request.resource.data.nota is number
+          && request.resource.data.nota >= 0
+          && request.resource.data.nota <= 10
+          && request.resource.data.notaHistory is list
+          && request.resource.data.categorias is map
+          && request.resource.data.categorias.keys().hasOnly([
+            'participacao', 'atividades', 'comportamento', 'fardamento', 'frequencia'
+          ])
+          && request.resource.data.activity is list
+          && request.resource.data.activity.size() <= 25
+          && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'];
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }
     }

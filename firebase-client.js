@@ -16,9 +16,11 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 
@@ -80,6 +82,20 @@ async function getRoom(code) {
 async function getRoomMembers(code) {
   const snapshot = await getDocs(collection(db, 'rooms', code, 'members'));
   return snapshot.docs.map((member) => member.data());
+}
+
+function subscribeRoomMembers(code, onChange, onError) {
+  return onSnapshot(collection(db, 'rooms', code, 'members'), (snapshot) => {
+    onChange(snapshot.docs.map((member) => ({ ...member.data(), uid: member.id })));
+  }, onError);
+}
+
+async function updateMemberProgress(code, memberId, progress) {
+  requireUser();
+  await updateDoc(doc(db, 'rooms', code, 'members', memberId), {
+    ...progress,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 async function loadRoomBundle(code) {
@@ -172,6 +188,8 @@ window.molbankFirebase = {
   },
   getRoom,
   getRoomMembers,
+  subscribeRoomMembers,
+  updateMemberProgress,
   loadRoomBundle,
   listTeacherRooms,
   listStudentRooms,
