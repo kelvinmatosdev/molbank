@@ -1324,7 +1324,6 @@ async function buyItem(idx){
 
   me.coins -= item.cost;
   logActivity(me, 'Resgate: ' + item.name, -item.cost, '🎁');
-  const room = rooms[state.roomCode];
   room.teacherAlerts = room.teacherAlerts || [];
   room.teacherAlerts.unshift({ type:'compra', matricula: me.matricula, nome: me.nome, detail: item.name, cost: item.cost, time: Date.now() });
   showToast('Resgatado: ' + item.name);
@@ -2761,7 +2760,7 @@ function showToast(msg){
   toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
 }
 
-setAuthMode('register');
+setAuthMode('login');
 
 window.addEventListener('molbank-firebase-ready', ()=>{
   const api = window.molbankFirebase;
