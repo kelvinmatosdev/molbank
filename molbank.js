@@ -586,14 +586,28 @@ function closeJoinModal(){
   document.getElementById('joinModalOverlay').style.display = 'none';
 }
 
-function confirmJoinModal(){
+async function confirmJoinModal(){
   const code = document.getElementById('joinModalInput').value.trim().toUpperCase();
   if(!code){ showToast('Digita o código da sala'); return; }
-  if(!rooms[code]){ showToast('Código não encontrado'); return; }
-  joinRoomByCode(code, state.name);
-  closeJoinModal();
-  renderHome();
-  showToast('Você entrou na turma!');
+  try{
+    const api = await firebaseApi();
+    const joined = await api.joinRoom(code, state.name);
+    if(joined){
+      rooms[code] = cloudRoomToLocal(joined, state.uid);
+      state.myRoomCodes = [...new Set([...(state.myRoomCodes || []), code])];
+      state.roomCode = code;
+    } else if(rooms[code] && !rooms[code].isCloud){
+      joinRoomByCode(code, state.name);
+    } else {
+      showToast('Código não encontrado');
+      return;
+    }
+    closeJoinModal();
+    renderHome();
+    showToast('Você entrou na turma!');
+  } catch(error){
+    showToast(firebaseErrorMessage(error));
+  }
 }
 
 /* =====================================================================
@@ -740,45 +754,190 @@ function setFieldError(id, show){
 }
 function clearFieldError(id){ setFieldError(id, false); }
 
-function login(){
-  const name = document.getElementById('loginName').value.trim();
-  const nameValid = name.length > 0;
-  setFieldError('loginName', !nameValid);
+let authMode = 'register';
+let authBusy = false;
 
-  let roomValid = true;
-  let code = '';
-  if(state.role !== 'professor'){
-    const skip = document.getElementById('skipRoomCheck').checked;
-    code = document.getElementById('loginRoomCode').value.trim().toUpperCase();
-    if(!skip && !code){ roomValid = false; }
-    setFieldError('loginRoomCode', !roomValid);
-    if(!skip && code && !rooms[code]){
-      setFieldError('loginRoomCode', true);
-      document.getElementById('loginRoomCodeError').textContent = 'Código não encontrado — confere com o professor da turma.';
-      roomValid = false;
-    } else {
-      document.getElementById('loginRoomCodeError').textContent = 'Digita o código da sala, ou marca a opção abaixo.';
-    }
+function setAuthMode(mode){
+  authMode = mode === 'login' ? 'login' : 'register';
+  const isRegister = authMode === 'register';
+  document.getElementById('loginNameField').style.display = isRegister ? 'block' : 'none';
+  document.getElementById('rolePick').style.display = isRegister ? 'flex' : 'none';
+  document.getElementById('loginSubmitButton').textContent = isRegister ? 'Criar conta' : 'Entrar no Molbank';
+  document.getElementById('authModeSwitch').innerHTML = isRegister
+    ? 'Já tem uma conta? <b onclick="setAuthMode(\'login\')">Entrar</b>'
+    : 'Ainda não tem conta? <b onclick="setAuthMode(\'register\')">Criar conta</b>';
+  document.getElementById('forgotPasswordSwitch').style.display = isRegister ? 'none' : 'block';
+  document.getElementById('loginPassword').autocomplete = isRegister ? 'new-password' : 'current-password';
+  document.getElementById('loginAuthError').classList.remove('show');
+  clearFieldError('loginName');
+  clearFieldError('loginEmail');
+  clearFieldError('loginPassword');
+}
+
+function submitAuth(){
+  return authMode === 'register' ? registerAccount() : login();
+}
+
+function setAuthMessage(message){
+  const error = document.getElementById('loginAuthError');
+  error.textContent = message || '';
+  error.classList.toggle('show', Boolean(message));
+}
+
+function firebaseErrorMessage(error){
+  const code = error?.code || error?.message || '';
+  if(code.includes('email-already-in-use')) return 'Esse e-mail já tem uma conta. Toque em “Entrar”.';
+  if(code.includes('invalid-email')) return 'Esse e-mail parece inválido. Confere se foi digitado certo.';
+  if(code.includes('weak-password')) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if(code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'E-mail ou senha não conferem.';
+  if(code.includes('too-many-requests')) return 'Muitas tentativas. Aguarde um pouco e tente de novo.';
+  if(code.includes('network-request-failed')) return 'Não consegui conectar. Confira a internet e tente de novo.';
+  if(code.includes('ROOM_CODE_TAKEN')) return 'Esse código já está em uso. Tente criar a turma novamente.';
+  if(code.includes('ROOM_NOT_OWNED')) return 'Essa turma pertence a outra conta.';
+  if(code.includes('PROFILE_NOT_FOUND')) return 'Não encontrei o perfil dessa conta. Tente criar a conta novamente.';
+  if(code.includes('permission-denied')) return 'O Firebase ainda está bloqueando o acesso. Precisamos publicar as regras seguras do banco.';
+  return 'Não consegui concluir. Confira os dados e tente novamente.';
+}
+
+async function firebaseApi(){
+  if(window.molbankFirebase) return window.molbankFirebase;
+  await new Promise((resolve, reject)=>{
+    const timeout = setTimeout(()=>reject(new Error('FIREBASE_LOAD_TIMEOUT')), 12000);
+    window.addEventListener('molbank-firebase-ready', ()=>{ clearTimeout(timeout); resolve(); }, {once:true});
+  });
+  if(!window.molbankFirebase) throw new Error('FIREBASE_LOAD_FAILED');
+  return window.molbankFirebase;
+}
+
+function cloudRoomToLocal(room, uid){
+  const students = (room.students || []).map(data=>{
+    const student = makeStudent(data.nome || 'Aluno', data.matricula || data.uid || '');
+    Object.assign(student, data);
+    student.isMe = data.uid === uid;
+    return student;
+  });
+  return { ...room, students, avisos: room.avisos || [], isCloud: true };
+}
+
+function replaceCloudRooms(list, uid){
+  Object.keys(rooms).forEach(code=>{ if(rooms[code]?.isCloud) delete rooms[code]; });
+  (list || []).filter(Boolean).forEach(room=>{ rooms[room.code] = cloudRoomToLocal(room, uid); });
+}
+
+async function finishFirebaseLogin(user, profile, requestedCode){
+  if(!profile || !['aluno','professor'].includes(profile.role)) throw new Error('PROFILE_NOT_FOUND');
+  state.uid = user.uid;
+  state.email = user.email || '';
+  state.name = profile.name || user.displayName || 'Usuário';
+  state.role = profile.role;
+  state.teacherName = state.role === 'professor' ? state.name : '';
+  state.teacherRoomCode = '';
+
+  const api = await firebaseApi();
+  let cloudRooms = state.role === 'professor'
+    ? await api.listTeacherRooms()
+    : await api.listStudentRooms(profile.roomCodes || []);
+
+  const code = state.role === 'aluno'
+    ? String(requestedCode || '').trim().toUpperCase()
+    : '';
+  if(code){
+    const joined = await api.joinRoom(code, state.name);
+    if(joined) cloudRooms = [joined, ...cloudRooms.filter(room=>room.code !== code)];
+    else if(rooms[code] && !rooms[code].isCloud) joinRoomByCode(code, state.name);
+    else showToast('Conta criada, mas não encontrei essa turma. Você pode entrar nela depois.');
   }
 
-  if(!nameValid || !roomValid) return;
-  state.name = name;
-
+  replaceCloudRooms(cloudRooms, user.uid);
+  state.myRoomCodes = cloudRooms.map(room=>room.code);
   if(state.role === 'professor'){
-    state.teacherName = name;
-    state.teacherRoomCode = ''; // limpa a "última sala vista" — não pode herdar de quem logou antes
-    document.getElementById('teacherAvatar2').textContent = name[0].toUpperCase();
-    document.getElementById('teacherGreetName2').textContent = name;
+    document.getElementById('teacherAvatar2').textContent = (state.name[0] || 'P').toUpperCase();
+    document.getElementById('teacherGreetName2').textContent = state.name;
     renderTeacherRooms();
     switchScreen('screen-teacher-rooms');
     buildNav('navTeacherRooms', 'rooms');
   } else {
-    if(code){ joinRoomByCode(code, name); } else { state.roomCode = ''; }
-    document.getElementById('studentGreetName').textContent = name;
-    document.getElementById('studentAvatar').textContent = name[0].toUpperCase();
+    state.roomCode = code && rooms[code] ? code : (state.myRoomCodes[0] || '');
+    document.getElementById('studentGreetName').textContent = state.name;
+    document.getElementById('studentAvatar').textContent = (state.name[0] || 'A').toUpperCase();
     renderHome();
     switchScreen('screen-home');
     buildNav('navStudent', 'home');
+  }
+  setAuthMessage('');
+}
+
+async function login(){
+  if(authBusy) return;
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const passwordValid = password.length >= 6;
+  setFieldError('loginEmail', !emailValid);
+  setFieldError('loginPassword', !passwordValid);
+  if(!emailValid || !passwordValid) return;
+
+  authBusy = true;
+  const button = document.getElementById('loginSubmitButton');
+  button.disabled = true;
+  setAuthMessage('Entrando...');
+  try{
+    const api = await firebaseApi();
+    const result = await api.signIn(email, password);
+    const code = document.getElementById('loginRoomCode').value;
+    await finishFirebaseLogin(result.user, result.profile, code);
+  } catch(error){
+    setAuthMessage(firebaseErrorMessage(error));
+  } finally {
+    authBusy = false;
+    button.disabled = false;
+  }
+}
+
+async function registerAccount(){
+  if(authBusy) return;
+  const name = document.getElementById('loginName').value.trim();
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const nameValid = name.length >= 2;
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const passwordValid = password.length >= 6;
+  setFieldError('loginName', !nameValid);
+  setFieldError('loginEmail', !emailValid);
+  setFieldError('loginPassword', !passwordValid);
+  if(!nameValid || !emailValid || !passwordValid) return;
+
+  authBusy = true;
+  const button = document.getElementById('loginSubmitButton');
+  button.disabled = true;
+  setAuthMessage('Criando sua conta...');
+  try{
+    const api = await firebaseApi();
+    const user = await api.createAccount({ name, email, password, role: state.role });
+    const profile = await api.getProfile(user.uid);
+    const code = state.role === 'aluno' ? document.getElementById('loginRoomCode').value : '';
+    await finishFirebaseLogin(user, profile, code);
+  } catch(error){
+    setAuthMessage(firebaseErrorMessage(error));
+  } finally {
+    authBusy = false;
+    button.disabled = false;
+  }
+}
+
+async function resetPassword(){
+  const email = document.getElementById('loginEmail').value.trim();
+  if(!email){
+    setFieldError('loginEmail', true);
+    setAuthMessage('Digite seu e-mail para receber o link de redefinição.');
+    return;
+  }
+  try{
+    const api = await firebaseApi();
+    await api.sendPasswordReset(email);
+    setAuthMessage('Enviei um link para redefinir a senha, se esse e-mail estiver cadastrado.');
+  } catch(error){
+    setAuthMessage(firebaseErrorMessage(error));
   }
 }
 
@@ -842,11 +1001,31 @@ function applyTheme(){
   if(icon) icon.textContent = currentTheme === 'escuro' ? '🌙' : '☀️';
 }
 
-function logoutToLogin(){
+async function logoutToLogin(){
+  try{
+    if(window.molbankFirebase) await window.molbankFirebase.signOut();
+  } catch(error){
+    showToast('Não consegui encerrar a sessão. Tente novamente.');
+    return;
+  }
+  Object.keys(rooms).forEach(code=>{ if(rooms[code]?.isCloud) delete rooms[code]; });
+  state.uid = '';
+  state.email = '';
+  state.name = '';
+  state.role = 'aluno';
+  state.teacherName = '';
+  state.roomCode = '';
+  state.teacherRoomCode = '';
+  state.myRoomCodes = [];
+  document.querySelectorAll('#rolePick button').forEach(button=>button.classList.toggle('selected', button.dataset.role === 'aluno'));
+  document.getElementById('alunoJoinArea').style.display = 'block';
   document.getElementById('loginName').value = '';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginPassword').value = '';
   document.getElementById('loginRoomCode').value = '';
   const skipCheck = document.getElementById('skipRoomCheck');
   if(skipCheck) skipCheck.checked = false;
+  setAuthMode('login');
   showToast('Você saiu da conta');
   switchScreen('screen-login');
 }
@@ -1425,7 +1604,7 @@ function leaveRoom(){
    ===================================================================== */
 function getMyTeacherRooms(){
   return Object.values(rooms)
-    .filter(r => r.teacherName === state.teacherName)
+    .filter(r => r.isCloud ? r.teacherUid === state.uid : (!state.uid && r.teacherName === state.teacherName))
     .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
 }
 
@@ -1469,29 +1648,44 @@ function closeDeleteRoom(){
   roomPendingDelete = null;
 }
 
-function executeDeleteRoom(){
+async function executeDeleteRoom(){
   if(!roomPendingDelete) return;
-  const roomName = rooms[roomPendingDelete] ? rooms[roomPendingDelete].name : '';
-  delete rooms[roomPendingDelete];
-  if(state.teacherRoomCode === roomPendingDelete) state.teacherRoomCode = '';
-  closeDeleteRoom();
-  renderTeacherRooms();
-  showToast('Turma "' + roomName + '" excluída');
+  const code = roomPendingDelete;
+  const roomName = rooms[code] ? rooms[code].name : '';
+  try{
+    if(rooms[code]?.isCloud){
+      const api = await firebaseApi();
+      await api.deleteRoom(code);
+    }
+    delete rooms[code];
+    if(state.teacherRoomCode === code) state.teacherRoomCode = '';
+    closeDeleteRoom();
+    renderTeacherRooms();
+    showToast('Turma "' + roomName + '" excluída');
+  } catch(error){
+    showToast(firebaseErrorMessage(error));
+  }
 }
 
 function openCreateRoom(){
   document.getElementById('createRoomBox').style.display = 'block';
 }
 
-function createRoom(){
+async function createRoom(){
   const name = document.getElementById('newRoomName').value.trim();
   if(!name){ showToast('Dá um nome pra turma'); return; }
   const code = generateRoomCode();
-  rooms[code] = { code, name, teacherName: state.teacherName, students: [], createdAt: Date.now(), avisos: [] };
-  document.getElementById('newRoomName').value = '';
-  document.getElementById('createRoomBox').style.display = 'none';
-  renderTeacherRooms();
-  showToast('Turma criada! Código: ' + code);
+  try{
+    const api = await firebaseApi();
+    const room = await api.createRoom({ code, name, teacherName: state.teacherName });
+    rooms[code] = cloudRoomToLocal(room, state.uid);
+    document.getElementById('newRoomName').value = '';
+    document.getElementById('createRoomBox').style.display = 'none';
+    renderTeacherRooms();
+    showToast('Turma criada! Código: ' + code);
+  } catch(error){
+    showToast(firebaseErrorMessage(error));
+  }
 }
 
 function renderFrequencia(){
@@ -2417,3 +2611,19 @@ function showToast(msg){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
 }
+
+setAuthMode('register');
+
+window.addEventListener('molbank-firebase-ready', ()=>{
+  const api = window.molbankFirebase;
+  api.onAuthStateChanged(async user=>{
+    if(!user || authBusy || state.uid) return;
+    try{
+      const profile = await api.getProfile(user.uid);
+      if(profile) await finishFirebaseLogin(user, profile, new URLSearchParams(window.location.search).get('code') || '');
+      else await api.signOut();
+    } catch(error){
+      setAuthMessage(firebaseErrorMessage(error));
+    }
+  });
+}, {once:true});

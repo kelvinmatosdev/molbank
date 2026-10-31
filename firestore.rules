@@ -1,0 +1,74 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsRoom(roomCode) {
+      return signedIn()
+        && get(/databases/$(database)/documents/rooms/$(roomCode)).data.teacherUid == request.auth.uid;
+    }
+
+    function belongsToRoom(roomCode) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid));
+    }
+
+    match /users/{userId} {
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'email', 'role', 'createdAt'])
+        && request.resource.data.uid == userId
+        && request.resource.data.name is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['aluno', 'professor'];
+
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list: if false;
+
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roomCodes'])
+        && request.resource.data.roomCodes is list;
+
+      allow delete: if false;
+    }
+
+    match /rooms/{roomCode} {
+      // O código da turma permite consultar apenas os dados básicos da sala.
+      // A lista de salas só pode ser consultada pelo professor proprietário.
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.teacherUid == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['code', 'name', 'teacherName', 'teacherUid', 'createdAt'])
+        && request.resource.data.code == roomCode
+        && request.resource.data.name is string
+        && request.resource.data.teacherUid == request.auth.uid;
+
+      allow update, delete: if ownsRoom(roomCode);
+
+      match /members/{memberId} {
+        allow get: if signedIn()
+          && (memberId == request.auth.uid || ownsRoom(roomCode) || belongsToRoom(roomCode));
+
+        allow list: if signedIn()
+          && (ownsRoom(roomCode) || belongsToRoom(roomCode));
+
+        allow create: if signedIn()
+          && memberId == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'uid', 'nome', 'matricula', 'coins', 'nota', 'notaHistory',
+            'categorias', 'activity', 'avisosSeen', 'joinedAt'
+          ])
+          && exists(/databases/$(database)/documents/rooms/$(roomCode));
+
+        allow update: if ownsRoom(roomCode);
+        allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
+      }
+    }
+  }
+}
