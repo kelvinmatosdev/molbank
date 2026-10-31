@@ -80,14 +80,15 @@ service cloud.firestore {
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.keys().hasOnly([
             'uid', 'nome', 'matricula', 'coins', 'nota', 'notaHistory',
-            'categorias', 'activity', 'avisosSeen', 'joinedAt'
+            'categorias', 'activity', 'avisosSeen', 'attendanceHistory',
+            'freqMarkedToday', 'freqMarkedDate', 'joinedAt'
           ])
           && exists(/databases/$(database)/documents/rooms/$(roomCode));
 
         allow update: if (ownsRoom(roomCode)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'coins', 'nota', 'notaHistory', 'categorias', 'activity',
-            'freqMarkedToday', 'mission', 'updatedAt'
+            'freqMarkedToday', 'freqMarkedDate', 'attendanceHistory', 'mission', 'updatedAt'
           ])
           && request.resource.data.coins is number
           && request.resource.data.coins >= 0
@@ -101,8 +102,11 @@ service cloud.firestore {
           ])
           && request.resource.data.activity is list
           && request.resource.data.activity.size() <= 25
+          && request.resource.data.attendanceHistory is list
+          && request.resource.data.attendanceHistory.size() <= 400
           && validMission(request.resource.data.mission)
-          && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'])
+          && request.resource.data.freqMarkedToday in [null, 'presente', 'falta']
+          && (request.resource.data.freqMarkedDate == null || request.resource.data.freqMarkedDate is string))
           || (signedIn()
             && memberId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([

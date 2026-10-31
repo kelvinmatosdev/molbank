@@ -66,6 +66,7 @@ function makeStudent(nome, matricula){
     matricula: matricula || ('20263' + Math.floor(Math.random()*9000000+1000000)),
     nome: nome, coins: 0, nota: 0, notaHistory: [], storeBonusActive: null,
     categorias:{participacao:0, atividades:0, comportamento:0, fardamento:0, frequencia:0},
+    attendanceHistory: [], freqMarkedDate: null,
     mission:null, // null | {type:'questoes'|'apresentacao', status:'pendente'|'autorizada'|'concluida', requestedAt:number}
     activity: [], avisosSeen: {},
   };
@@ -114,7 +115,9 @@ function persistTeacherProgress(student, roomCode = state.teacherRoomCode){
     categorias: student.categorias || {},
     activity: Array.isArray(student.activity) ? student.activity.slice(0, 25) : [],
     mission: student.mission || null,
+    attendanceHistory: Array.isArray(student.attendanceHistory) ? student.attendanceHistory.slice(0, 400) : [],
     freqMarkedToday: student.freqMarkedToday || null,
+    freqMarkedDate: student.freqMarkedDate || null,
   };
   const key = roomCode + ':' + student.uid;
   const previous = progressWriteQueues.get(key) || Promise.resolve();
@@ -1932,6 +1935,84 @@ async function createRoom(){
   }
 }
 
+function attendanceDateKey(date = new Date()){
+  const year = date.getFullYear();
+  const month = String(date.getMonth()+1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatAttendanceDate(dateKey){
+  const [year, month, day] = String(dateKey).split('-').map(Number);
+  if(!year || !month || !day) return dateKey;
+  return new Date(year, month-1, day).toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+}
+
+function getTodayAttendance(student){
+  if(!student?.freqMarkedToday) return null;
+  if(!student.freqMarkedDate) return student.freqMarkedToday; // chamadas antigas ainda não têm data registrada
+  return student.freqMarkedDate === attendanceDateKey() ? student.freqMarkedToday : null;
+}
+
+function recordAttendance(student, status){
+  const dateKey = attendanceDateKey();
+  const previous = Array.isArray(student.attendanceHistory) ? student.attendanceHistory : [];
+  student.attendanceHistory = [
+    { dateKey, status, markedAt:Date.now() },
+    ...previous.filter(record=>record.dateKey !== dateKey),
+  ].slice(0, 400);
+  student.freqMarkedToday = status;
+  student.freqMarkedDate = dateKey;
+}
+
+function renderAttendanceHistory(room, container){
+  const byDate = new Map();
+  room.students.forEach(student=>{
+    (student.attendanceHistory || []).forEach(record=>{
+      if(!record?.dateKey || !['presente','falta'].includes(record.status)) return;
+      if(!byDate.has(record.dateKey)) byDate.set(record.dateKey, new Map());
+      byDate.get(record.dateKey).set(student.uid || student.matricula, { student, status:record.status });
+    });
+  });
+
+  const section = document.createElement('section');
+  section.style.cssText = 'margin-top:22px;';
+  const title = document.createElement('div');
+  title.className = 'section-title';
+  title.textContent = 'Histórico de frequência';
+  section.appendChild(title);
+  if(byDate.size === 0){
+    const empty = document.createElement('p');
+    empty.style.cssText = 'font-size:12.5px; color:var(--gray); text-align:center; padding:14px 0;';
+    empty.textContent = 'As próximas chamadas aparecerão aqui por data.';
+    section.appendChild(empty);
+  } else {
+    [...byDate.keys()].sort((a,b)=>b.localeCompare(a)).forEach(dateKey=>{
+      const records = byDate.get(dateKey);
+      const present = [...records.values()].filter(item=>item.status === 'presente').length;
+      const absent = records.size - present;
+      const details = document.createElement('details');
+      details.style.cssText = 'background:var(--gray-light); border-radius:13px; padding:12px 14px; margin-bottom:8px;';
+      const summary = document.createElement('summary');
+      summary.style.cssText = 'cursor:pointer; font-size:12.5px; font-weight:700;';
+      summary.textContent = `${formatAttendanceDate(dateKey)} · ${present} presente(s) · ${absent} falta(s) · ${room.students.length-records.size} sem registro`;
+      details.appendChild(summary);
+      const rows = document.createElement('div');
+      rows.style.cssText = 'margin-top:10px;';
+      room.students.forEach(student=>{
+        const record = records.get(student.uid || student.matricula);
+        const row = document.createElement('p');
+        row.style.cssText = 'font-size:12px; padding:5px 0; border-top:1px solid var(--gray);';
+        row.textContent = `${student.nome}: ${record ? (record.status === 'presente' ? 'Presente' : 'Falta') : 'Sem registro'}`;
+        rows.appendChild(row);
+      });
+      details.appendChild(rows);
+      section.appendChild(details);
+    });
+  }
+  container.appendChild(section);
+}
+
 function renderFrequencia(){
   const room = rooms[state.teacherRoomCode];
   if(!room) return;
@@ -1939,7 +2020,7 @@ function renderFrequencia(){
   list.innerHTML = '';
 
   const total = room.students.length;
-  const marcados = room.students.filter(s=>s.freqMarkedToday).length;
+  const marcados = room.students.filter(getTodayAttendance).length;
   const pct = total > 0 ? Math.round((marcados/total)*100) : 0;
   document.getElementById('freqProgressLabel').textContent = `${marcados} de ${total} aluno(s) marcado(s)`;
   document.getElementById('freqProgressBar').style.width = pct + '%';
@@ -1947,17 +2028,18 @@ function renderFrequencia(){
   const resetBtn = document.createElement('button');
   resetBtn.className = 'btn btn-outline';
   resetBtn.style.marginBottom = '14px';
-  resetBtn.textContent = '🔄 Nova chamada (resetar o dia)';
+  resetBtn.textContent = '🔄 Nova chamada (limpar status atual)';
   resetBtn.onclick = ()=>{
     resetBtn.classList.add('pulse');
     resetBtn.style.color = '#fff';
     setTimeout(()=>{
       room.students.forEach(s=>{
         s.freqMarkedToday = null;
+        s.freqMarkedDate = null;
         persistTeacherProgress(s, room.code);
       });
       renderFrequencia();
-      showToast('Chamada resetada');
+      showToast('Status atual limpo; histórico preservado');
     }, 260);
   };
   list.appendChild(resetBtn);
@@ -1973,7 +2055,7 @@ function renderFrequencia(){
   room.students.forEach(s=>{
     const row = document.createElement('div');
     row.className = 'student-manage';
-    const marked = s.freqMarkedToday;
+    const marked = getTodayAttendance(s);
     const statusText = marked ? (marked==='presente' ? '✅ Presente hoje · registrado' : '❌ Falta hoje · registrado') : 'Ainda não marcado';
     row.innerHTML = `
       <div class="sm-top" style="cursor:default; ${marked ? 'opacity:.75;' : ''}">
@@ -1986,6 +2068,7 @@ function renderFrequencia(){
       </div>`;
     list.appendChild(row);
   });
+  renderAttendanceHistory(room, list);
 }
 
 function markAllPresente(){
@@ -1993,8 +2076,8 @@ function markAllPresente(){
   if(!room || room.students.length === 0) return;
   let count = 0;
   room.students.forEach(s=>{
-    if(!s.freqMarkedToday){
-      s.freqMarkedToday = 'presente';
+    if(!getTodayAttendance(s)){
+      recordAttendance(s, 'presente');
       s.categorias.frequencia = (s.categorias.frequencia||0) + 1;
       s.coins += 1;
       logActivity(s, 'Presença registrada', 1, '✅');
@@ -2009,9 +2092,9 @@ function markFrequencia(matricula, status){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s) return;
-  if(s.freqMarkedToday){ showToast('Já marcado hoje — usa "Nova chamada" pra refazer'); return; }
+  if(getTodayAttendance(s)){ showToast('Já marcado hoje — usa "Nova chamada" pra refazer'); return; }
   const value = status === 'presente' ? 1 : -2;
-  s.freqMarkedToday = status;
+  recordAttendance(s, status);
   s.categorias.frequencia = (s.categorias.frequencia||0) + value;
   s.coins = Math.max(0, s.coins + value);
   logActivity(s, status === 'presente' ? 'Presença registrada' : 'Falta não justificada', value, '✅');
@@ -2639,6 +2722,8 @@ async function approveBonus(matricula){
       coins:Math.max(0, s.coins-cost), nota:s.nota, notaHistory:history,
       categorias:s.categorias||{}, activity,
       freqMarkedToday:s.freqMarkedToday||null,
+      freqMarkedDate:s.freqMarkedDate||null,
+      attendanceHistory:Array.isArray(s.attendanceHistory) ? s.attendanceHistory.slice(0, 400) : [],
     };
     try{
       const api = await firebaseApi();
