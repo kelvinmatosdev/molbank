@@ -684,20 +684,27 @@ function renderTeacherPerfil(){
   document.getElementById('teacherProfileAvatarBig').textContent = (name[0] || 'P').toUpperCase();
 }
 
-function saveTeacherProfile(){
+async function saveTeacherProfile(){
   const newName = document.getElementById('teacherProfileNameInput').value.trim();
   if(!newName){ showToast('O nome não pode ficar vazio'); return; }
-  const oldTeacherName = state.teacherName;
+  if(newName.length < 2 || newName.length > 80){ showToast('O nome precisa ter entre 2 e 80 caracteres'); return; }
+  try{
+    const api = await firebaseApi();
+    await api.updateAccountName(newName, 'professor', state.myRoomCodes || []);
+  }catch(error){
+    showToast(firebaseErrorMessage(error));
+    return;
+  }
   state.name = newName;
   state.teacherName = newName;
-  // atualiza o "dono" nas turmas que já eram dela/dele, senão elas ficam órfãs
-  Object.values(rooms).forEach(r=>{ if(r.teacherName === oldTeacherName) r.teacherName = newName; });
+  Object.values(rooms).forEach(room=>{ if(room.teacherUid === state.uid) room.teacherName = newName; });
   document.getElementById('teacherAvatar2').textContent = newName[0].toUpperCase();
   document.getElementById('teacherGreetName2').textContent = newName;
   const teacherAvatar = document.getElementById('teacherAvatar');
   if(teacherAvatar) teacherAvatar.textContent = newName[0].toUpperCase();
   document.getElementById('teacherProfileAvatarBig').textContent = newName[0].toUpperCase();
-  showToast('Perfil atualizado');
+  renderTeacherRooms();
+  showToast('Nome atualizado e salvo no Firebase');
 }
 
 function getMe(){
@@ -1817,15 +1824,26 @@ function renderPerfil(){
   }).join('');
 }
 
-function saveProfile(){
+async function saveProfile(){
   const newName = document.getElementById('profileNameInput').value.trim();
   if(!newName){ showToast('O nome não pode ficar vazio'); return; }
+  if(newName.length < 2 || newName.length > 80){ showToast('O nome precisa ter entre 2 e 80 caracteres'); return; }
+  try{
+    const api = await firebaseApi();
+    await api.updateAccountName(newName, 'aluno', state.myRoomCodes || []);
+  }catch(error){
+    showToast(firebaseErrorMessage(error));
+    return;
+  }
   state.name = newName;
-  const me = getMe();
-  if(me) me.nome = newName;
+  Object.values(rooms).forEach(room=>room.students?.forEach(student=>{
+    if(student.uid === state.uid) student.nome = newName;
+  }));
   document.getElementById('studentGreetName').textContent = newName;
   document.getElementById('studentAvatar').textContent = newName[0].toUpperCase();
-  showToast('Perfil atualizado');
+  renderPerfil();
+  renderHome();
+  showToast('Nome atualizado e salvo no Firebase');
 }
 
 function leaveRoomCode(code){

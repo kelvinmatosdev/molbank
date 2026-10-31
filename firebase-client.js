@@ -24,6 +24,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -69,6 +70,45 @@ async function signIn(email, password) {
 
 async function sendPasswordReset(email) {
   return sendPasswordResetEmail(auth, email);
+}
+
+async function updateAccountName(name, role, roomCodes = []) {
+  const user = requireUser();
+  const cleanName = String(name || '').trim();
+  if (cleanName.length < 2 || cleanName.length > 80) throw new Error('INVALID_PROFILE_NAME');
+  if (!['aluno', 'professor'].includes(role)) throw new Error('INVALID_PROFILE_ROLE');
+
+  const batch = writeBatch(db);
+  const userRef = doc(db, 'users', user.uid);
+  const profileSnapshot = await getDoc(userRef);
+  if (!profileSnapshot.exists() || profileSnapshot.data().role !== role) throw new Error('PROFILE_NOT_FOUND');
+  batch.update(userRef, { name: cleanName });
+  let codes = [...new Set(roomCodes)].filter(Boolean);
+  if (role === 'aluno') codes = [...new Set([...codes, ...(profileSnapshot.data().roomCodes || [])])];
+  else {
+    const ownedRooms = await getDocs(query(collection(db, 'rooms'), where('teacherUid', '==', user.uid)));
+    codes = [...new Set([...codes, ...ownedRooms.docs.map(room => room.id)])];
+  }
+  const uniqueCodes = codes;
+  for (const code of uniqueCodes) {
+    if (role === 'aluno') {
+      const memberRef = doc(db, 'rooms', code, 'members', user.uid);
+      if ((await getDoc(memberRef)).exists()) batch.update(memberRef, { nome: cleanName });
+    } else {
+      const roomRef = doc(db, 'rooms', code);
+      const room = await getDoc(roomRef);
+      if (room.exists() && room.data().teacherUid === user.uid) batch.update(roomRef, { teacherName: cleanName });
+    }
+  }
+
+  const oldDisplayName = user.displayName || '';
+  await updateProfile(user, { displayName: cleanName });
+  try {
+    await batch.commit();
+  } catch (error) {
+    await updateProfile(user, { displayName: oldDisplayName }).catch(() => {});
+    throw error;
+  }
 }
 
 function requireUser() {
@@ -313,6 +353,7 @@ window.molbankFirebase = {
   signIn,
   signOut: () => signOut(auth),
   sendPasswordReset,
+  updateAccountName,
   onAuthStateChanged: (callback) => onAuthStateChanged(auth, callback),
   getProfile: async (uid) => {
     const snapshot = await getDoc(doc(db, 'users', uid));

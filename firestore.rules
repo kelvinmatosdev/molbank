@@ -30,8 +30,12 @@ service cloud.firestore {
 
       allow update: if signedIn()
         && request.auth.uid == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roomCodes'])
-        && request.resource.data.roomCodes is list;
+        && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roomCodes'])
+            && request.resource.data.roomCodes is list)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+            && request.resource.data.name is string
+            && request.resource.data.name.size() >= 2
+            && request.resource.data.name.size() <= 80));
 
       allow delete: if false;
     }
@@ -163,7 +167,14 @@ service cloud.firestore {
             && memberId == request.auth.uid
             && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisosSeen'])
-            && request.resource.data.avisosSeen is map);
+            && request.resource.data.avisosSeen is map)
+          || (signedIn()
+            && memberId == request.auth.uid
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome'])
+            && request.resource.data.nome is string
+            && request.resource.data.nome.size() >= 2
+            && request.resource.data.nome.size() <= 80);
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }
 
