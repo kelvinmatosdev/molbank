@@ -100,6 +100,12 @@ async function updateMemberProgress(code, memberId, progress) {
   });
 }
 
+async function requestMemberMission(code, memberId, mission, activity) {
+  const user = requireUser();
+  if (user.uid !== memberId) throw new Error('NOT_YOUR_MEMBER_RECORD');
+  await updateDoc(doc(db, 'rooms', code, 'members', memberId), { mission, activity });
+}
+
 function subscribeStoreBonusRequests(code, isTeacher, onChange, onError) {
   const requests = collection(db, 'rooms', code, 'storeRequests');
   const requestQuery = isTeacher
@@ -257,6 +263,7 @@ window.molbankFirebase = {
   getRoomMembers,
   subscribeRoomMembers,
   updateMemberProgress,
+  requestMemberMission,
   subscribeStoreBonusRequests,
   createStoreBonusRequest,
   redeemStoreItem,

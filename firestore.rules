@@ -45,6 +45,16 @@ service cloud.firestore {
           || (itemName == 'Brinde surpresa' && cost == 20);
       }
 
+      function validMission(mission) {
+        return mission == null
+          || (mission is map
+            && mission.keys().hasOnly(['type', 'presentationDate', 'status', 'requestedAt'])
+            && mission.type in ['questoes', 'apresentacao']
+            && mission.presentationDate is string
+            && mission.status in ['pendente', 'autorizada']
+            && mission.requestedAt is number);
+      }
+
       // O código da turma permite consultar apenas os dados básicos da sala.
       // A lista de salas só pode ser consultada pelo professor proprietário.
       allow get: if signedIn();
@@ -77,7 +87,7 @@ service cloud.firestore {
         allow update: if (ownsRoom(roomCode)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'coins', 'nota', 'notaHistory', 'categorias', 'activity',
-            'freqMarkedToday', 'updatedAt'
+            'freqMarkedToday', 'mission', 'updatedAt'
           ])
           && request.resource.data.coins is number
           && request.resource.data.coins >= 0
@@ -91,6 +101,7 @@ service cloud.firestore {
           ])
           && request.resource.data.activity is list
           && request.resource.data.activity.size() <= 25
+          && validMission(request.resource.data.mission)
           && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'])
           || (signedIn()
             && memberId == request.auth.uid
@@ -122,6 +133,27 @@ service cloud.firestore {
               == 0 - getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.cost
             && request.resource.data.activity[0].pos == false
             && request.resource.data.activity[0].icon == '🎁'
+            && request.resource.data.activity[0].ts is number)
+          || (signedIn()
+            && memberId == request.auth.uid
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mission', 'activity'])
+            && (!resource.data.keys().hasAny(['mission']) || resource.data.mission == null)
+            && request.resource.data.mission is map
+            && request.resource.data.mission.keys().hasOnly(['type', 'presentationDate', 'status', 'requestedAt'])
+            && request.resource.data.mission.type in ['questoes', 'apresentacao']
+            && request.resource.data.mission.presentationDate is string
+            && request.resource.data.mission.status == 'pendente'
+            && request.resource.data.mission.requestedAt is number
+            && resource.data.notaHistory is list
+            && resource.data.notaHistory.size() > 0
+            && resource.data.notaHistory[0].nota + resource.data.notaHistory[0].get('bonus', 0) < 6
+            && request.resource.data.activity is list
+            && request.resource.data.activity.size() > 0
+            && request.resource.data.activity.size() <= 25
+            && request.resource.data.activity[0].amount == 0
+            && request.resource.data.activity[0].pos == true
+            && request.resource.data.activity[0].icon == '🎯'
             && request.resource.data.activity[0].ts is number);
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }

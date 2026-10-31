@@ -113,6 +113,7 @@ function persistTeacherProgress(student, roomCode = state.teacherRoomCode){
     notaHistory: Array.isArray(student.notaHistory) ? student.notaHistory : [],
     categorias: student.categorias || {},
     activity: Array.isArray(student.activity) ? student.activity.slice(0, 25) : [],
+    mission: student.mission || null,
     freqMarkedToday: student.freqMarkedToday || null,
   };
   const key = roomCode + ':' + student.uid;
@@ -1508,11 +1509,35 @@ function renderMissao(){
   renderMissionOrderList('missaoQueueBox', room);
 }
 
-function requestMission(type, presentationDate){
+async function requestMission(type, presentationDate){
   const me = getMe(); if(!me) return;
   const room = rooms[state.roomCode];
   if(countMissionsOnDate(room, presentationDate) >= MAX_PER_DAY){ showToast('Esse dia já está lotado — escolhe outro'); return; }
-  me.mission = { type, presentationDate, status:'pendente', requestedAt: Date.now() };
+  const mission = { type, presentationDate, status:'pendente', requestedAt: Date.now() };
+  if(room?.isCloud){
+    if(me.mission){ showToast('Você já tem uma missão em andamento'); return; }
+    const activity = {label:'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + formatDateFriendly(presentationDate), amount:0, pos:true, icon:'🎯', ts:Date.now()};
+    me.mission = mission;
+    closeDatePicker();
+    renderMissao(); renderHome();
+    try{
+      const api = await firebaseApi();
+      await api.requestMemberMission(state.roomCode, me.uid, mission, [activity, ...(me.activity||[])].slice(0,25));
+      if(!(me.activity||[]).some(entry=>entry.ts === activity.ts && entry.label === activity.label)){
+        me.activity = [activity, ...(me.activity||[])].slice(0,25);
+      }
+      showToast('Solicitação enviada pro professor');
+      renderMissao(); renderHome();
+    }catch(error){
+      me.mission = null;
+      renderMissao(); renderHome();
+      showToast(error.code === 'permission-denied'
+        ? 'O Firebase bloqueou a missão. Publique as regras atualizadas.'
+        : 'Não consegui enviar a missão. Confira a conexão e tente de novo.');
+    }
+    return;
+  }
+  me.mission = mission;
   logActivity(me, 'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + formatDateFriendly(presentationDate), 0, '🎯');
   showToast('Solicitação enviada pro professor');
   closeDatePicker();
@@ -2441,7 +2466,7 @@ function setNota(matricula){
 function authorizeMission(matricula){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
-  if(!s || !s.mission) return;
+  if(!s || !s.mission || s.mission.status !== 'pendente') return;
   s.mission.status = 'autorizada';
   logActivity(s, 'Missão autorizada: ' + MISSION_TYPES[s.mission.type].title, 0, '🎯');
   renderTeacher();
@@ -2451,9 +2476,10 @@ function authorizeMission(matricula){
 function rejectMission(matricula){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
-  if(!s) return;
-  logActivity(s, 'Missão recusada: ' + MISSION_TYPES[s.mission.type].title, 0, '🚫');
+  if(!s || !s.mission) return;
+  const missionTitle = MISSION_TYPES[s.mission.type].title;
   s.mission = null;
+  logActivity(s, 'Missão recusada: ' + missionTitle, 0, '🚫');
   renderTeacher();
   showToast('Missão recusada para ' + s.nome);
 }
@@ -2461,7 +2487,8 @@ function rejectMission(matricula){
 function completeMission(matricula, bonusValue){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
-  if(!s || !s.mission) return;
+  if(!s || !s.mission || s.mission.status !== 'autorizada') return;
+  const missionTitle = MISSION_TYPES[s.mission.type].title;
   s.coins += 2;
   if(bonusValue > 0){
     let latest = getLatestNota(s);
@@ -2472,9 +2499,9 @@ function completeMission(matricula, bonusValue){
     }
     latest.bonus = (latest.bonus||0) + bonusValue;
   }
-  const bonusText = bonusValue > 0 ? (' · +' + bonusValue.toFixed(1) + ' na nota') : '';
-  logActivity(s, 'Missão concluída: ' + MISSION_TYPES[s.mission.type].title + bonusText, 2, '✅');
   s.mission = null;
+  const bonusText = bonusValue > 0 ? (' · +' + bonusValue.toFixed(1) + ' na nota') : '';
+  logActivity(s, 'Missão concluída: ' + missionTitle + bonusText, 2, '✅');
   renderTeacher();
   showToast('Missão concluída · +2 mol-edas' + bonusText + ' · ' + s.nome);
 }
