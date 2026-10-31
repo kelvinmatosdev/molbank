@@ -153,6 +153,22 @@ function timeAgo(ts){
    ===================================================================== */
 function getAvisos(room){ return room.avisos || (room.avisos = []); }
 
+function escapeAvisoText(value){
+  return String(value ?? '').replace(/[&<>"']/g, char=>({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;',
+  }[char]));
+}
+
+async function saveCloudAviso(room, aviso){
+  if(!room?.isCloud) return;
+  const api = await firebaseApi();
+  await api.saveRoomAnnouncement(room.code, aviso);
+}
+
+function showAvisoSyncError(){
+  showToast('Não consegui salvar o aviso no Firebase. Confira a conexão e as regras.');
+}
+
 function getUnreadForTeacher(aviso){
   return aviso.comments.filter(c=>c.autorRole==='aluno' && c.ts > (aviso.teacherLastSeen||0)).length;
 }
@@ -195,8 +211,8 @@ function renderTeacherAvisosCard(room){
   const unreadBadge = totalUnread > 0 ? `<span style="background:var(--red); color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; margin-left:6px;">${totalUnread} novo(s)</span>` : '';
   box.innerHTML = `<div style="background:var(--gray-light); border-radius:16px; padding:14px; cursor:pointer;" onclick="goTo('avisos')">
     <p style="font-size:11px; color:var(--gray); margin-bottom:6px;">${avisos.length} aviso(s) publicado(s)${unreadBadge}</p>
-    <p style="font-size:13px; font-weight:700; margin-bottom:2px;">${ultimo.titulo}</p>
-    <p style="font-size:11.5px; color:var(--gray); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${ultimo.mensagem}</p>
+    <p style="font-size:13px; font-weight:700; margin-bottom:2px;">${escapeAvisoText(ultimo.titulo)}</p>
+    <p style="font-size:11.5px; color:var(--gray); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeAvisoText(ultimo.mensagem)}</p>
     <p style="font-size:10.5px; color:var(--gray); margin-top:8px;">${timeAgo(ultimo.ts)}</p>
   </div>`;
 }
@@ -223,8 +239,8 @@ function renderStudentAvisosCard(room){
   }
   const summaryTag = novosAvisos > 1 ? `<span style="font-size:10px; color:var(--red); font-weight:700;"> · ${novosAvisos} avisos novos</span>` : '';
   box.innerHTML = `<div style="background:var(--gray-light); border-radius:16px; padding:14px;">
-    <p style="font-size:13px; font-weight:700; margin-bottom:3px;">${ultimo.titulo}${unreadTag}</p>
-    <p style="font-size:11.5px; color:var(--gray); margin-bottom:10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${ultimo.mensagem}</p>
+    <p style="font-size:13px; font-weight:700; margin-bottom:3px;">${escapeAvisoText(ultimo.titulo)}${unreadTag}</p>
+    <p style="font-size:11.5px; color:var(--gray); margin-bottom:10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${escapeAvisoText(ultimo.mensagem)}</p>
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <span style="font-size:10.5px; color:var(--gray);">${timeAgo(ultimo.ts)}${summaryTag}</span>
       <button class="corner-btn" onclick="goTo('avisos')">Ver todos</button>
@@ -264,8 +280,8 @@ function renderAvisosLista(){
     <div class="store-item" style="cursor:pointer; align-items:flex-start;" onclick="openAvisoDetail(${a.id})">
       <div class="store-ic">📣</div>
       <div class="store-info">
-        <p>${a.titulo}${badge}</p>
-        <span style="display:block; margin-bottom:4px;">${a.mensagem}</span>
+      <p>${escapeAvisoText(a.titulo)}${badge}</p>
+      <span style="display:block; margin-bottom:4px;">${escapeAvisoText(a.mensagem)}</span>
         <span style="font-size:10px;">${timeAgo(a.ts)}${a.comments.length ? ' · ' + a.comments.length + ' comentário(s)' : ''}${a.editedAt ? ' · editado' : ''}</span>
       </div>
     </div>`;
@@ -282,10 +298,17 @@ function openAvisoDetail(avisoId){
 
   if(state.role === 'professor'){
     markAvisoSeenByTeacher(aviso);
+    saveCloudAviso(room, aviso).catch(showAvisoSyncError);
     renderTeacher();
   } else {
     const me = getMe();
-    if(me){ markAvisoSeenByStudent(me, avisoId); renderStudentAvisosCard(room); }
+    if(me){
+      markAvisoSeenByStudent(me, avisoId);
+      if(room.isCloud && me.uid){
+        firebaseApi().then(api=>api.updateMemberAvisosSeen(room.code, me.uid, me.avisosSeen)).catch(showAvisoSyncError);
+      }
+      renderStudentAvisosCard(room);
+    }
   }
   renderAvisosLista();
 }
@@ -308,7 +331,7 @@ function renderAvisoDetail(avisoId){
 
   const msgBox = document.createElement('div');
   msgBox.style.cssText = 'background:var(--gray-light); border-radius:16px; padding:14px; margin-bottom:16px;';
-  msgBox.innerHTML = `<p style="font-size:13.5px; line-height:1.5;">${aviso.mensagem}</p>`;
+  msgBox.innerHTML = `<p style="font-size:13.5px; line-height:1.5;">${escapeAvisoText(aviso.mensagem)}</p>`;
   content.appendChild(msgBox);
 
   if(isTeacher){
@@ -346,7 +369,7 @@ function renderAvisoDetail(avisoId){
         row.style.cssText = 'padding:10px 0; border-bottom:1px solid var(--gray-light);';
         const isProf = c.autorRole === 'professor';
         row.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-          <p style="font-size:12.5px;"><b style="color:${isProf?'var(--orange)':'var(--text-primary)'};">${c.autorNome}${isProf?' (professor(a))':''}</b><br>${c.texto}</p>
+          <p style="font-size:12.5px;"><b style="color:${isProf?'var(--orange)':'var(--text-primary)'};">${escapeAvisoText(c.autorNome)}${isProf?' (professor(a))':''}</b><br>${escapeAvisoText(c.texto)}</p>
           ${isTeacher ? `<a onclick="confirmDeleteComment(${aviso.id}, ${c.id})" style="font-size:10.5px; color:var(--red); text-decoration:underline; cursor:pointer; white-space:nowrap;">excluir</a>` : ''}
         </div>
         <span style="font-size:10px; color:var(--gray);">${timeAgo(c.ts)}</span>`;
@@ -369,23 +392,36 @@ function toggleAvisoComments(avisoId, allow){
   const aviso = getAvisos(room).find(a=>a.id===avisoId);
   if(!aviso) return;
   aviso.allowComments = allow;
+  saveCloudAviso(room, aviso).catch(showAvisoSyncError);
   renderAvisoDetail(avisoId);
   renderAvisosLista();
 }
 
-function submitAvisoComment(avisoId){
+async function submitAvisoComment(avisoId){
   const room = getCurrentRoomForAvisos();
   const aviso = getAvisos(room).find(a=>a.id===avisoId);
   if(!aviso) return;
   const input = document.getElementById('avisoCommentInput');
   const texto = input.value.trim();
   if(!texto) return;
+  if(texto.length > 500){ showToast('O comentário pode ter no máximo 500 caracteres'); return; }
   const isTeacher = state.role === 'professor';
   const autorNome = isTeacher ? (state.teacherName || state.name) : (getMe() ? getMe().nome : state.name);
-  aviso.comments.push({ id: Date.now()+Math.random(), autorNome, autorRole: isTeacher ? 'professor' : 'aluno', texto, ts: Date.now() });
+  const comment = { id: Date.now()+Math.random(), autorNome, autorRole: isTeacher ? 'professor' : 'aluno', texto, ts: Date.now() };
+  aviso.comments.push(comment);
   input.value = '';
   renderAvisoDetail(avisoId);
   renderAvisosLista();
+  if(room.isCloud){
+    try{
+      const api = await firebaseApi();
+      await api.createAnnouncementComment(room.code, avisoId, comment);
+    }catch(error){
+      aviso.comments = aviso.comments.filter(item=>item.id !== comment.id);
+      renderAvisoDetail(avisoId); renderAvisosLista(); showAvisoSyncError();
+      return;
+    }
+  }
   showToast('Comentário enviado');
 }
 
@@ -394,7 +430,14 @@ function confirmDeleteComment(avisoId, commentId){
     const room = getCurrentRoomForAvisos();
     const aviso = getAvisos(room).find(a=>a.id===avisoId);
     if(!aviso) return;
+    const removed = aviso.comments.find(c=>c.id===commentId);
     aviso.comments = aviso.comments.filter(c=>c.id!==commentId);
+    if(room.isCloud){
+      firebaseApi().then(api=>api.deleteAnnouncementComment(room.code, avisoId, commentId)).catch(()=>{
+        if(removed) aviso.comments.push(removed);
+        renderAvisoDetail(avisoId); renderAvisosLista(); showAvisoSyncError();
+      });
+    }
     renderAvisoDetail(avisoId);
     renderAvisosLista();
     showToast('Comentário excluído');
@@ -430,26 +473,34 @@ function closeAvisoForm(){
   avisoFormEditingId = null;
 }
 
-function saveAvisoForm(){
+async function saveAvisoForm(){
   const titulo = document.getElementById('avisoFormTitulo').value.trim();
   const mensagem = document.getElementById('avisoFormMensagem').value.trim();
   const allowComments = document.getElementById('avisoFormAllowComments').checked;
   if(!titulo || !mensagem){ showToast('Preenche o título e a mensagem'); return; }
+  if(titulo.length > 100 || mensagem.length > 2000){ showToast('O título aceita até 100 caracteres e a mensagem até 2.000'); return; }
   const room = getCurrentRoomForAvisos();
   const avisos = getAvisos(room);
 
   if(avisoFormEditingId){
     const aviso = avisos.find(a=>a.id===avisoFormEditingId);
+    const previous = { titulo:aviso.titulo, mensagem:aviso.mensagem, allowComments:aviso.allowComments, editedAt:aviso.editedAt };
     aviso.titulo = titulo;
     aviso.mensagem = mensagem;
     aviso.allowComments = allowComments;
     aviso.editedAt = Date.now();
+    try{ await saveCloudAviso(room, aviso); }catch(error){ Object.assign(aviso, previous); showAvisoSyncError(); return; }
     showToast('Aviso atualizado');
   } else {
-    avisos.push({
+    const aviso = {
       id: Date.now()+Math.random(), titulo, mensagem, allowComments,
       dataPub: new Date().toLocaleDateString('pt-BR'), ts: Date.now(), editedAt: null, comments: [], teacherLastSeen: Date.now()
-    });
+    };
+    avisos.push(aviso);
+    try{ await saveCloudAviso(room, aviso); }catch(error){
+      room.avisos = avisos.filter(item=>item.id !== aviso.id);
+      showAvisoSyncError(); return;
+    }
     showToast('Aviso publicado');
   }
   closeAvisoForm();
@@ -461,6 +512,9 @@ function confirmDeleteAviso(avisoId){
   showGenericConfirm('Excluir aviso?', 'Os comentários desse aviso também serão apagados. Essa ação não pode ser desfeita.', ()=>{
     const room = getCurrentRoomForAvisos();
     room.avisos = getAvisos(room).filter(a=>a.id!==avisoId);
+    if(room.isCloud){
+      firebaseApi().then(api=>api.deleteRoomAnnouncement(room.code, avisoId)).catch(showAvisoSyncError);
+    }
     closeAvisoDetail();
     renderAvisosLista();
     renderTeacherAvisosCard(room);
@@ -758,12 +812,18 @@ function replaceCloudRooms(list, uid){
 
 const cloudProgressSubscriptions = new Map();
 const cloudStoreRequestSubscriptions = new Map();
+const cloudAnnouncementSubscriptions = new Map();
+const cloudAnnouncementCommentSubscriptions = new Map();
 
 function stopCloudProgressSync(){
   cloudProgressSubscriptions.forEach(unsubscribe=>unsubscribe());
   cloudProgressSubscriptions.clear();
   cloudStoreRequestSubscriptions.forEach(unsubscribe=>unsubscribe());
   cloudStoreRequestSubscriptions.clear();
+  cloudAnnouncementSubscriptions.forEach(unsubscribe=>unsubscribe());
+  cloudAnnouncementSubscriptions.clear();
+  cloudAnnouncementCommentSubscriptions.forEach(unsubscribe=>unsubscribe());
+  cloudAnnouncementCommentSubscriptions.clear();
 }
 
 function stopCloudRoomProgressSync(code){
@@ -773,6 +833,61 @@ function stopCloudRoomProgressSync(code){
   const requestUnsubscribe = cloudStoreRequestSubscriptions.get(code);
   if(requestUnsubscribe) requestUnsubscribe();
   cloudStoreRequestSubscriptions.delete(code);
+  const announcementUnsubscribe = cloudAnnouncementSubscriptions.get(code);
+  if(announcementUnsubscribe) announcementUnsubscribe();
+  cloudAnnouncementSubscriptions.delete(code);
+  [...cloudAnnouncementCommentSubscriptions.keys()].filter(key=>key.startsWith(code + ':')).forEach(key=>{
+    cloudAnnouncementCommentSubscriptions.get(key)?.();
+    cloudAnnouncementCommentSubscriptions.delete(key);
+  });
+}
+
+function refreshAvisosView(code){
+  const room = rooms[code];
+  if(!room) return;
+  if(state.role === 'professor' && state.teacherRoomCode === code) renderTeacherAvisosCard(room);
+  if(state.role === 'aluno' && state.roomCode === code) renderStudentAvisosCard(room);
+  if(document.querySelector('.screen.active')?.id === 'screen-avisos') renderAvisosLista();
+  const overlay = document.getElementById('avisoDetailOverlay');
+  if(overlay?.style.display === 'flex' && overlay.dataset.avisoId){
+    renderAvisoDetail(Number(overlay.dataset.avisoId) || overlay.dataset.avisoId);
+  }
+}
+
+function watchCloudAnnouncements(code){
+  if(cloudAnnouncementSubscriptions.has(code) || !rooms[code]?.isCloud || !window.molbankFirebase) return;
+  const api = window.molbankFirebase;
+  const unsubscribe = api.subscribeRoomAnnouncements(code, announcements=>{
+    const room = rooms[code];
+    if(!room?.isCloud) return;
+    const previousById = new Map(getAvisos(room).map(aviso=>[String(aviso.id), aviso]));
+    const nextIds = new Set(announcements.map(aviso=>String(aviso.id)));
+    [...cloudAnnouncementCommentSubscriptions.keys()].filter(key=>{
+      const [roomCode, ...idParts] = key.split(':');
+      return roomCode === code && !nextIds.has(idParts.join(':'));
+    }).forEach(key=>{
+      cloudAnnouncementCommentSubscriptions.get(key)?.();
+      cloudAnnouncementCommentSubscriptions.delete(key);
+    });
+    room.avisos = announcements.map(aviso=>({
+      ...aviso,
+      comments: previousById.get(String(aviso.id))?.comments || [],
+    }));
+    room.avisos.forEach(aviso=>{
+      const key = code + ':' + aviso.id;
+      if(cloudAnnouncementCommentSubscriptions.has(key)) return;
+      const commentUnsubscribe = api.subscribeAnnouncementComments(code, aviso.id, comments=>{
+        const currentRoom = rooms[code];
+        const currentAviso = currentRoom?.avisos?.find(item=>String(item.id) === String(aviso.id));
+        if(!currentAviso) return;
+        currentAviso.comments = comments.sort((a,b)=>a.ts-b.ts);
+        refreshAvisosView(code);
+      }, ()=>showAvisoSyncError());
+      cloudAnnouncementCommentSubscriptions.set(key, commentUnsubscribe);
+    });
+    refreshAvisosView(code);
+  }, ()=>showAvisoSyncError());
+  cloudAnnouncementSubscriptions.set(code, unsubscribe);
 }
 
 function watchCloudStoreBonusRequests(code){
@@ -847,6 +962,7 @@ function refreshProgressView(code){
 function watchCloudRoomProgress(code){
   if(cloudProgressSubscriptions.has(code) || !rooms[code]?.isCloud || !window.molbankFirebase) return;
   const api = window.molbankFirebase;
+  watchCloudAnnouncements(code);
   const unsubscribe = api.subscribeRoomMembers(code, memberRows=>{
     const room = rooms[code];
     if(!room?.isCloud) return;

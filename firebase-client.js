@@ -100,6 +100,56 @@ async function updateMemberProgress(code, memberId, progress) {
   });
 }
 
+async function updateMemberAvisosSeen(code, memberId, avisosSeen) {
+  const user = requireUser();
+  if (user.uid !== memberId) throw new Error('NOT_YOUR_MEMBER_RECORD');
+  await updateDoc(doc(db, 'rooms', code, 'members', memberId), { avisosSeen });
+}
+
+async function getRoomAnnouncements(code) {
+  const snapshot = await getDocs(collection(db, 'rooms', code, 'announcements'));
+  return snapshot.docs.map((announcement) => ({ ...announcement.data(), id: Number(announcement.id) || announcement.id, comments: [] }));
+}
+
+async function saveRoomAnnouncement(code, announcement) {
+  requireUser();
+  const { comments, id, ...data } = announcement;
+  await setDoc(doc(db, 'rooms', code, 'announcements', String(announcement.id)), data);
+}
+
+async function deleteRoomAnnouncement(code, announcementId) {
+  requireUser();
+  const comments = await getDocs(collection(db, 'rooms', code, 'announcements', String(announcementId), 'comments'));
+  await Promise.all(comments.docs.map((comment) => deleteDoc(comment.ref)));
+  await deleteDoc(doc(db, 'rooms', code, 'announcements', String(announcementId)));
+}
+
+function subscribeRoomAnnouncements(code, onChange, onError) {
+  return onSnapshot(collection(db, 'rooms', code, 'announcements'), (snapshot) => {
+    onChange(snapshot.docs.map((announcement) => ({ ...announcement.data(), id: Number(announcement.id) || announcement.id, comments: [] })));
+  }, onError);
+}
+
+function subscribeAnnouncementComments(code, announcementId, onChange, onError) {
+  return onSnapshot(collection(db, 'rooms', code, 'announcements', String(announcementId), 'comments'), (snapshot) => {
+    onChange(snapshot.docs.map((comment) => ({ ...comment.data(), id: Number(comment.id) || comment.id })));
+  }, onError);
+}
+
+async function createAnnouncementComment(code, announcementId, comment) {
+  const user = requireUser();
+  const { id, ...data } = comment;
+  await setDoc(doc(db, 'rooms', code, 'announcements', String(announcementId), 'comments', String(comment.id)), {
+    ...data,
+    autorUid: user.uid,
+  });
+}
+
+async function deleteAnnouncementComment(code, announcementId, commentId) {
+  requireUser();
+  await deleteDoc(doc(db, 'rooms', code, 'announcements', String(announcementId), 'comments', String(commentId)));
+}
+
 async function requestMemberMission(code, memberId, mission, activity) {
   const user = requireUser();
   if (user.uid !== memberId) throw new Error('NOT_YOUR_MEMBER_RECORD');
@@ -174,11 +224,11 @@ async function resolveStoreBonusRequest(code, requestId, memberId, progress, sta
 async function loadRoomBundle(code) {
   const room = await getRoom(code);
   if (!room) return null;
-  const members = await getRoomMembers(code);
+  const [members, avisos] = await Promise.all([getRoomMembers(code), getRoomAnnouncements(code)]);
   return {
     ...room,
     students: members,
-    avisos: room.avisos || [],
+    avisos,
     isCloud: true,
   };
 }
@@ -243,6 +293,12 @@ async function deleteRoom(code) {
   if (room.data().teacherUid !== user.uid) throw new Error('ROOM_NOT_OWNED');
   const members = await getDocs(collection(db, 'rooms', code, 'members'));
   await Promise.all(members.docs.map((member) => deleteDoc(member.ref)));
+  const announcements = await getDocs(collection(db, 'rooms', code, 'announcements'));
+  await Promise.all(announcements.docs.map(async (announcement) => {
+    const comments = await getDocs(collection(db, 'rooms', code, 'announcements', announcement.id, 'comments'));
+    await Promise.all(comments.docs.map((comment) => deleteDoc(comment.ref)));
+    await deleteDoc(announcement.ref);
+  }));
   await deleteDoc(roomRef);
 }
 
@@ -263,6 +319,14 @@ window.molbankFirebase = {
   getRoomMembers,
   subscribeRoomMembers,
   updateMemberProgress,
+  updateMemberAvisosSeen,
+  getRoomAnnouncements,
+  saveRoomAnnouncement,
+  deleteRoomAnnouncement,
+  subscribeRoomAnnouncements,
+  subscribeAnnouncementComments,
+  createAnnouncementComment,
+  deleteAnnouncementComment,
   requestMemberMission,
   subscribeStoreBonusRequests,
   createStoreBonusRequest,

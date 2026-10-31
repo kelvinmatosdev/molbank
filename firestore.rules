@@ -154,7 +154,12 @@ service cloud.firestore {
             && request.resource.data.activity[0].amount == 0
             && request.resource.data.activity[0].pos == true
             && request.resource.data.activity[0].icon == '🎯'
-            && request.resource.data.activity[0].ts is number);
+            && request.resource.data.activity[0].ts is number)
+          || (signedIn()
+            && memberId == request.auth.uid
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisosSeen'])
+            && request.resource.data.avisosSeen is map);
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }
 
@@ -211,6 +216,73 @@ service cloud.firestore {
           && request.resource.data.decidedAt is number;
 
         allow delete: if false;
+      }
+
+      match /announcements/{announcementId} {
+        allow get, list: if signedIn() && (ownsRoom(roomCode) || belongsToRoom(roomCode));
+
+        allow create: if ownsRoom(roomCode)
+          && request.resource.data.keys().hasOnly([
+            'titulo', 'mensagem', 'allowComments', 'dataPub', 'ts', 'editedAt', 'teacherLastSeen'
+          ])
+          && request.resource.data.titulo is string
+          && request.resource.data.titulo.size() > 0
+          && request.resource.data.titulo.size() <= 100
+          && request.resource.data.mensagem is string
+          && request.resource.data.mensagem.size() > 0
+          && request.resource.data.mensagem.size() <= 2000
+          && request.resource.data.allowComments is bool
+          && request.resource.data.dataPub is string
+          && request.resource.data.ts is number
+          && request.resource.data.teacherLastSeen is number;
+
+        allow update: if ownsRoom(roomCode)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'titulo', 'mensagem', 'allowComments', 'dataPub', 'ts', 'editedAt', 'teacherLastSeen'
+          ])
+          && request.resource.data.titulo is string
+          && request.resource.data.titulo.size() > 0
+          && request.resource.data.titulo.size() <= 100
+          && request.resource.data.mensagem is string
+          && request.resource.data.mensagem.size() > 0
+          && request.resource.data.mensagem.size() <= 2000
+          && request.resource.data.allowComments is bool
+          && request.resource.data.dataPub is string
+          && request.resource.data.ts is number
+          && request.resource.data.teacherLastSeen is number;
+
+        allow delete: if ownsRoom(roomCode);
+
+        match /comments/{commentId} {
+          function announcementAllowsComments() {
+            return get(/databases/$(database)/documents/rooms/$(roomCode)/announcements/$(announcementId)).data.allowComments == true;
+          }
+
+          allow get, list: if signedIn() && (ownsRoom(roomCode) || belongsToRoom(roomCode));
+
+          allow create: if signedIn()
+            && announcementAllowsComments()
+            && request.resource.data.keys().hasOnly(['autorUid', 'autorNome', 'autorRole', 'texto', 'ts'])
+            && request.resource.data.autorUid == request.auth.uid
+            && request.resource.data.autorNome is string
+            && request.resource.data.autorNome.size() > 0
+            && request.resource.data.texto is string
+            && request.resource.data.texto.size() > 0
+            && request.resource.data.texto.size() <= 500
+            && request.resource.data.ts is number
+            && ((ownsRoom(roomCode)
+                && request.resource.data.autorRole == 'professor'
+                && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor'
+                && request.resource.data.autorNome == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name)
+              || (belongsToRoom(roomCode)
+                && request.resource.data.autorRole == 'aluno'
+                && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
+                && request.resource.data.autorNome
+                  == get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.nome));
+
+          allow update: if false;
+          allow delete: if ownsRoom(roomCode) || (signedIn() && resource.data.autorUid == request.auth.uid);
+        }
       }
     }
   }
