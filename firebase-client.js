@@ -115,9 +115,40 @@ async function createStoreBonusRequest(code, request) {
   await addDoc(collection(db, 'rooms', code, 'storeRequests'), {
     ...request,
     memberUid: user.uid,
+    requestType: 'bonus',
     status: 'pendente',
     createdAt: Date.now(),
   });
+}
+
+async function redeemStoreItem(code, memberId, { itemName, cost, activity }) {
+  const user = requireUser();
+  if (user.uid !== memberId) throw new Error('NOT_YOUR_MEMBER_RECORD');
+  const memberRef = doc(db, 'rooms', code, 'members', memberId);
+  const requestRef = doc(collection(db, 'rooms', code, 'storeRequests'));
+  let newBalance = 0;
+  await runTransaction(db, async (transaction) => {
+    const memberSnapshot = await transaction.get(memberRef);
+    if (!memberSnapshot.exists()) throw new Error('MEMBER_NOT_FOUND');
+    const currentBalance = Number(memberSnapshot.data().coins) || 0;
+    if (currentBalance < cost) throw new Error('INSUFFICIENT_BALANCE');
+    newBalance = currentBalance - cost;
+    transaction.update(memberRef, {
+      coins: newBalance,
+      activity: [activity, ...(memberSnapshot.data().activity || [])].slice(0, 25),
+      lastStoreRequestId: requestRef.id,
+    });
+    transaction.set(requestRef, {
+      requestType: 'purchase',
+      memberUid: user.uid,
+      studentName: memberSnapshot.data().nome,
+      itemName,
+      cost,
+      status: 'resgatado',
+      createdAt: serverTimestamp(),
+    });
+  });
+  return newBalance;
 }
 
 async function resolveStoreBonusRequest(code, requestId, memberId, progress, status) {
@@ -228,6 +259,7 @@ window.molbankFirebase = {
   updateMemberProgress,
   subscribeStoreBonusRequests,
   createStoreBonusRequest,
+  redeemStoreItem,
   resolveStoreBonusRequest,
   loadRoomBundle,
   listTeacherRooms,

@@ -37,6 +37,14 @@ service cloud.firestore {
     }
 
     match /rooms/{roomCode} {
+      function validStorePurchase(itemName, cost) {
+        return (itemName == 'Dica' && cost == 8)
+          || (itemName == 'Verificação' && cost == 8)
+          || (itemName == 'Assistida' && cost == 10)
+          || (itemName == 'Travamento' && cost == 12)
+          || (itemName == 'Brinde surpresa' && cost == 20);
+      }
+
       // O código da turma permite consultar apenas os dados básicos da sala.
       // A lista de salas só pode ser consultada pelo professor proprietário.
       allow get: if signedIn();
@@ -66,7 +74,7 @@ service cloud.firestore {
           ])
           && exists(/databases/$(database)/documents/rooms/$(roomCode));
 
-        allow update: if ownsRoom(roomCode)
+        allow update: if (ownsRoom(roomCode)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'coins', 'nota', 'notaHistory', 'categorias', 'activity',
             'freqMarkedToday', 'updatedAt'
@@ -83,7 +91,38 @@ service cloud.firestore {
           ])
           && request.resource.data.activity is list
           && request.resource.data.activity.size() <= 25
-          && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'];
+          && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'])
+          || (signedIn()
+            && memberId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'coins', 'activity', 'lastStoreRequestId'
+            ])
+            && request.resource.data.lastStoreRequestId is string
+            && (!resource.data.keys().hasAny(['lastStoreRequestId'])
+              || request.resource.data.lastStoreRequestId != resource.data.lastStoreRequestId)
+            && request.resource.data.coins is number
+            && request.resource.data.coins >= 0
+            && request.resource.data.activity is list
+            && request.resource.data.activity.size() > 0
+            && request.resource.data.activity.size() <= 25
+            && existsAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId))
+            && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.requestType == 'purchase'
+            && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.memberUid == request.auth.uid
+            && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.status == 'resgatado'
+            && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.createdAt == request.time
+            && validStorePurchase(
+              getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.itemName,
+              getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.cost
+            )
+            && resource.data.coins - request.resource.data.coins
+              == getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.cost
+            && request.resource.data.activity[0].label
+              == 'Resgate: ' + getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.itemName
+            && request.resource.data.activity[0].amount
+              == 0 - getAfter(/databases/$(database)/documents/rooms/$(roomCode)/storeRequests/$(request.resource.data.lastStoreRequestId)).data.cost
+            && request.resource.data.activity[0].pos == false
+            && request.resource.data.activity[0].icon == '🎁'
+            && request.resource.data.activity[0].ts is number);
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }
 
@@ -98,22 +137,40 @@ service cloud.firestore {
         allow create: if signedIn()
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
           && request.resource.data.keys().hasOnly([
-            'memberUid', 'studentName', 'entryId', 'latestNoteId', 'value', 'cost', 'status', 'createdAt'
+            'memberUid', 'studentName', 'requestType', 'entryId', 'latestNoteId',
+            'value', 'cost', 'itemName', 'status', 'createdAt'
           ])
           && request.resource.data.memberUid == request.auth.uid
           && request.resource.data.studentName is string
-          && request.resource.data.entryId is number
-          && request.resource.data.latestNoteId is number
-          && request.resource.data.status == 'pendente'
-          && request.resource.data.createdAt is number
           && exists(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid))
           && request.resource.data.studentName == get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.nome
-          && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins >= request.resource.data.cost
-          && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.notaHistory.size() > 0
-          && ((request.resource.data.value == 0.5 && request.resource.data.cost == 15)
-            || (request.resource.data.value == 1.0 && request.resource.data.cost == 25)
-            || (request.resource.data.value == 1.5 && request.resource.data.cost == 35)
-            || (request.resource.data.value == 2.0 && request.resource.data.cost == 50));
+          && ((request.resource.data.requestType == 'bonus'
+              && request.resource.data.keys().hasOnly([
+                'memberUid', 'studentName', 'requestType', 'entryId', 'latestNoteId',
+                'value', 'cost', 'status', 'createdAt'
+              ])
+              && request.resource.data.entryId is number
+              && request.resource.data.latestNoteId is number
+              && request.resource.data.status == 'pendente'
+              && request.resource.data.createdAt is number
+              && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins >= request.resource.data.cost
+              && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.notaHistory.size() > 0
+              && ((request.resource.data.value == 0.5 && request.resource.data.cost == 15)
+                || (request.resource.data.value == 1.0 && request.resource.data.cost == 25)
+                || (request.resource.data.value == 1.5 && request.resource.data.cost == 35)
+                || (request.resource.data.value == 2.0 && request.resource.data.cost == 50)))
+            || (request.resource.data.requestType == 'purchase'
+              && request.resource.data.keys().hasOnly([
+                'memberUid', 'studentName', 'requestType', 'itemName', 'cost', 'status', 'createdAt'
+              ])
+              && request.resource.data.itemName is string
+              && validStorePurchase(request.resource.data.itemName, request.resource.data.cost)
+              && request.resource.data.status == 'resgatado'
+              && request.resource.data.createdAt == request.time
+              && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins >= request.resource.data.cost
+              && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins
+                == get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins - request.resource.data.cost
+              && getAfter(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.lastStoreRequestId == requestId));
 
         allow update: if ownsRoom(roomCode)
           && resource.data.status == 'pendente'

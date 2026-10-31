@@ -780,8 +780,19 @@ function watchCloudStoreBonusRequests(code){
   const unsubscribe = api.subscribeStoreBonusRequests(code, state.role === 'professor', requests=>{
     const room = rooms[code];
     if(!room?.isCloud) return;
+    const requestTime = request=>typeof request.createdAt === 'number'
+      ? request.createdAt
+      : request.createdAt?.toMillis?.() || 0;
+    room.teacherAlerts = requests
+      .filter(request=>request.requestType === 'purchase')
+      .sort((a,b)=>requestTime(b)-requestTime(a))
+      .map(request=>({
+        type:'compra', matricula:request.memberUid, nome:request.studentName,
+        detail:request.itemName, cost:request.cost, time:requestTime(request),
+      }));
     const latestByStudent = new Map();
-    requests.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach(request=>{
+    requests.filter(request=>request.requestType === 'bonus' || !request.requestType)
+      .sort((a,b)=>requestTime(b)-requestTime(a)).forEach(request=>{
       if(!latestByStudent.has(request.memberUid)) latestByStudent.set(request.memberUid, request);
     });
     room.students.forEach(student=>{
@@ -1275,7 +1286,7 @@ function renderStore(){
   });
 }
 
-function buyItem(idx){
+async function buyItem(idx){
   const me = getMe(); const item = STORE_ITEMS[idx];
   if(!me || me.coins < item.cost) return;
   const isBonusItem = item.bonusValue !== undefined;
@@ -1284,6 +1295,30 @@ function buyItem(idx){
     if(me.storeBonusActive){ showToast('Você já tem um aumento em andamento'); return; }
     if(!me.notaHistory || me.notaHistory.length === 0){ showToast('Ainda não tem nenhuma nota lançada'); return; }
     openNotaPicker(idx);
+    return;
+  }
+
+  const room = rooms[state.roomCode];
+  if(room?.isCloud){
+    const activity = {label:'Resgate: ' + item.name, amount:-item.cost, pos:false, icon:'🎁', ts:Date.now()};
+    try{
+      const api = await firebaseApi();
+      me.coins = await api.redeemStoreItem(state.roomCode, me.uid, {
+        itemName:item.name,
+        cost:item.cost,
+        activity,
+      });
+      if(!(me.activity||[]).some(entry=>entry.ts === activity.ts && entry.label === activity.label)){
+        me.activity = [activity, ...(me.activity||[])].slice(0,25);
+      }
+      showToast('Resgatado: ' + item.name);
+      renderStore();
+      renderHome();
+    }catch(error){
+      showToast(error.message === 'INSUFFICIENT_BALANCE'
+        ? 'Saldo insuficiente para esse resgate.'
+        : 'Não consegui registrar a compra no Firebase. Confira a conexão e as regras.');
+    }
     return;
   }
 
