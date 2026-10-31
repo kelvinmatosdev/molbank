@@ -9,6 +9,7 @@ import {
   updateProfile,
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
+  addDoc,
   arrayUnion,
   collection,
   deleteDoc,
@@ -18,6 +19,7 @@ import {
   getFirestore,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -95,6 +97,40 @@ async function updateMemberProgress(code, memberId, progress) {
   await updateDoc(doc(db, 'rooms', code, 'members', memberId), {
     ...progress,
     updatedAt: serverTimestamp(),
+  });
+}
+
+function subscribeStoreBonusRequests(code, isTeacher, onChange, onError) {
+  const requests = collection(db, 'rooms', code, 'storeRequests');
+  const requestQuery = isTeacher
+    ? requests
+    : query(requests, where('memberUid', '==', requireUser().uid));
+  return onSnapshot(requestQuery, (snapshot) => {
+    onChange(snapshot.docs.map((request) => ({ ...request.data(), id: request.id })));
+  }, onError);
+}
+
+async function createStoreBonusRequest(code, request) {
+  const user = requireUser();
+  await addDoc(collection(db, 'rooms', code, 'storeRequests'), {
+    ...request,
+    memberUid: user.uid,
+    status: 'pendente',
+    createdAt: Date.now(),
+  });
+}
+
+async function resolveStoreBonusRequest(code, requestId, memberId, progress, status) {
+  requireUser();
+  const requestRef = doc(db, 'rooms', code, 'storeRequests', requestId);
+  const memberRef = doc(db, 'rooms', code, 'members', memberId);
+  await runTransaction(db, async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+    if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'pendente') {
+      throw new Error('REQUEST_ALREADY_RESOLVED');
+    }
+    if (status === 'aplicado') transaction.update(memberRef, { ...progress, updatedAt: serverTimestamp() });
+    transaction.update(requestRef, { status, decidedAt: Date.now() });
   });
 }
 
@@ -190,6 +226,9 @@ window.molbankFirebase = {
   getRoomMembers,
   subscribeRoomMembers,
   updateMemberProgress,
+  subscribeStoreBonusRequests,
+  createStoreBonusRequest,
+  resolveStoreBonusRequest,
   loadRoomBundle,
   listTeacherRooms,
   listStudentRooms,

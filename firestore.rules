@@ -86,6 +86,43 @@ service cloud.firestore {
           && request.resource.data.freqMarkedToday in [null, 'presente', 'falta'];
         allow delete: if memberId == request.auth.uid || ownsRoom(roomCode);
       }
+
+      match /storeRequests/{requestId} {
+        allow get: if signedIn()
+          && (ownsRoom(roomCode) || resource.data.memberUid == request.auth.uid);
+
+        // Alunos devem consultar somente seus próprios pedidos (filtrando por memberUid).
+        allow list: if ownsRoom(roomCode)
+          || (signedIn() && resource.data.memberUid == request.auth.uid);
+
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'aluno'
+          && request.resource.data.keys().hasOnly([
+            'memberUid', 'studentName', 'entryId', 'latestNoteId', 'value', 'cost', 'status', 'createdAt'
+          ])
+          && request.resource.data.memberUid == request.auth.uid
+          && request.resource.data.studentName is string
+          && request.resource.data.entryId is number
+          && request.resource.data.latestNoteId is number
+          && request.resource.data.status == 'pendente'
+          && request.resource.data.createdAt is number
+          && exists(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid))
+          && request.resource.data.studentName == get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.nome
+          && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.coins >= request.resource.data.cost
+          && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.notaHistory.size() > 0
+          && ((request.resource.data.value == 0.5 && request.resource.data.cost == 15)
+            || (request.resource.data.value == 1.0 && request.resource.data.cost == 25)
+            || (request.resource.data.value == 1.5 && request.resource.data.cost == 35)
+            || (request.resource.data.value == 2.0 && request.resource.data.cost == 50));
+
+        allow update: if ownsRoom(roomCode)
+          && resource.data.status == 'pendente'
+          && request.resource.data.status in ['aplicado', 'rejeitado']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decidedAt'])
+          && request.resource.data.decidedAt is number;
+
+        allow delete: if false;
+      }
     }
   }
 }
