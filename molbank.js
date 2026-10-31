@@ -491,6 +491,18 @@ function generateRoomCode(){
 let qrStream = null;
 let qrScanning = false;
 
+function roomCodeFromQr(value){
+  const rawValue = String(value || '').trim();
+  if(!rawValue) return '';
+
+  try{
+    const url = new URL(rawValue, window.location.href);
+    const code = url.searchParams.get('code');
+    if(code) return code.trim().toUpperCase();
+  } catch(err){ /* o conteúdo pode ser somente o código da turma */ }
+
+  return rawValue.toUpperCase();
+}
 async function openQrScanner(){
   const overlay = document.getElementById('qrScannerOverlay');
   const video = document.getElementById('qrVideo');
@@ -518,7 +530,7 @@ function scanQrFrame(){
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const code = jsQR(imageData.data, imageData.width, imageData.height);
     if(code && code.data){
-      const found = code.data.trim().toUpperCase();
+      const found = roomCodeFromQr(code.data);
       closeQrScanner();
       document.getElementById('joinModalInput').value = found;
       showToast('QR lido: ' + found);
@@ -1559,7 +1571,9 @@ function renderRoomQR(containerId, code, size){
   const el = document.getElementById(containerId);
   el.innerHTML = '';
   try{
-    new QRCode(el, { text: code, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+    const joinUrl = new URL(window.location.href);
+    joinUrl.searchParams.set('code', code);
+    new QRCode(el, { text: joinUrl.toString(), width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
   } catch(err){
     el.innerHTML = '<span style="font-size:9px; color:var(--gray); padding:4px; text-align:center;">QR indisponível</span>';
   }
