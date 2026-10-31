@@ -518,7 +518,7 @@ async function openQrScanner(){
   } catch(err){
     let message = 'Não consegui iniciar a câmera.';
     if(err.message === 'CAMERA_UNSUPPORTED') message = 'Este navegador não oferece acesso à câmera nesta página.';
-    else if(err.message === 'QR_READER_UNAVAILABLE') message = 'O leitor QR não carregou. Confira a conexão e tente de novo.';
+    else if(err.message === 'QR_READER_UNAVAILABLE') message = 'O leitor QR local não carregou. Recarregue a página e tente novamente.';
     else if(err.name === 'NotAllowedError') message = 'O Chrome bloqueou o acesso à câmera. Confira a permissão do navegador e do celular.';
     else if(err.name === 'NotFoundError') message = 'Não encontrei uma câmera disponível neste aparelho.';
     else if(err.name === 'NotReadableError') message = 'A câmera está ocupada por outro aplicativo. Feche-o e tente novamente.';
