@@ -486,31 +486,6 @@ function executeGenericConfirm(){
   closeGenericConfirm();
 }
 
-// Sala de demonstração pré-criada, pra testar sem precisar criar do zero
-function seedDemoRoom(){
-  const code = 'MOLQ42';
-  const list = [];
-  for(let i=0;i<7;i++){
-    const s = makeStudent('Aluno Exemplo ' + (i+1), '2026300' + (5000+i));
-    s.coins = 12 + (7-i)*4;
-    s.nota = (3.5 + i*0.9) % 10;
-    s.notaHistory = [{ id: Date.now()+Math.random(), nota: s.nota, date: 'Prova 1', mol: molFromNota(s.nota), bonus: 0 }];
-    s.categorias = {participacao:5, atividades:6, comportamento:2, fardamento:1, frequencia:3};
-    s.activity = [
-      {label:'Presença registrada', ts: Date.now() - 3*60*60*1000, amount:1, pos:true, icon:'✅'},
-      {label:'Atividade entregue no prazo', ts: Date.now() - 26*60*60*1000, amount:1, pos:true, icon:'📘'},
-    ];
-    list.push(s);
-  }
-  rooms[code] = { code, name:'Química — 2ºA (exemplo)', teacherName:'Bruna Andrade', students:list, createdAt: Date.now(), avisos: [
-    { id: Date.now()+1, titulo:'Prova de Estequiometria', mensagem:'Gente, não esqueçam! A prova vai ser dia 22/07, conteúdo até o capítulo 4.', dataPub: new Date().toLocaleDateString('pt-BR'), ts: Date.now() - 2*60*60*1000, allowComments:true, editedAt:null, teacherLastSeen: Date.now(), comments:[
-      { id: Date.now()+2, autorNome:'Aluno Exemplo 2', autorRole:'aluno', texto:'Profª, cai fórmula empírica também?', ts: Date.now() - 90*60*1000 },
-      { id: Date.now()+3, autorNome:'Bruna Andrade', autorRole:'professor', texto:'Sim, cai! Foquem nisso.', ts: Date.now() - 80*60*1000 },
-    ]},
-  ] };
-}
-seedDemoRoom();
-
 let state = { role:'aluno', name:'', teacherName:'', roomCode:'', teacherRoomCode:'', expandedStudent:null, selectMode:false, selectedStudents:[], bulkCategory:'fardamento', myRoomCodes:[] };
 
 function generateRoomCode(){
@@ -645,18 +620,6 @@ async function confirmJoinModal(){
   }
 }
 
-/* =====================================================================
-   MODO DE TESTE — trocar de visão sem logar de novo (só pra prototipagem)
-   ===================================================================== */
-function activeRoomForDev(){
-  return state.teacherRoomCode || state.roomCode || '';
-}
-
-function updateDevToggle(){
-  const btn = document.getElementById('devToggleBtn');
-  btn.style.display = state.name ? 'flex' : 'none';
-}
-
 function renderTeacherPerfil(){
   const name = state.teacherName || state.name || '';
   document.getElementById('teacherProfileNameInput').value = name;
@@ -679,81 +642,6 @@ function saveTeacherProfile(){
   showToast('Perfil atualizado');
 }
 
-function toggleDevPanel(){
-  const panel = document.getElementById('devPanel');
-  const isHidden = panel.style.display === 'none';
-  if(!isHidden){ panel.style.display = 'none'; return; }
-
-  const list = document.getElementById('devPanelList');
-  list.innerHTML = '';
-
-  const loginBtn = document.createElement('button');
-  loginBtn.style.cssText = 'display:block; width:100%; text-align:left; background:none; border:none; color:#fff; font-family:inherit; font-size:12.5px; font-weight:600; padding:9px 8px; border-radius:9px; cursor:pointer; border-bottom:1px solid #333; margin-bottom:4px;';
-  loginBtn.textContent = '🔁 Ir pra tela de login (logar com outra conta)';
-  loginBtn.onclick = ()=>{ document.getElementById('devPanel').style.display = 'none'; switchScreen('screen-login'); };
-  list.appendChild(loginBtn);
-
-  const allCodes = Object.keys(rooms);
-  if(allCodes.length === 0){ panel.style.display = 'block'; return; }
-
-  allCodes.forEach(roomCode=>{
-    const room = rooms[roomCode];
-    const groupLabel = document.createElement('p');
-    groupLabel.style.cssText = 'color:#7A7A7A; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; padding:8px 8px 2px;';
-    groupLabel.textContent = room.name + ' (' + room.code + ')';
-    list.appendChild(groupLabel);
-
-    const teacherBtn = document.createElement('button');
-    teacherBtn.style.cssText = 'display:block; width:100%; text-align:left; background:none; border:none; color:#fff; font-family:inherit; font-size:12.5px; font-weight:600; padding:9px 8px; border-radius:9px; cursor:pointer;';
-    teacherBtn.textContent = '🧑‍🏫 Professor(a) — ' + (room.teacherName || 'sem nome');
-    teacherBtn.onclick = ()=>{ devViewAsTeacher(roomCode); };
-    list.appendChild(teacherBtn);
-
-    room.students.forEach(s=>{
-      const b = document.createElement('button');
-      b.style.cssText = 'display:block; width:100%; text-align:left; background:none; border:none; color:#fff; font-family:inherit; font-size:12.5px; font-weight:600; padding:9px 8px; border-radius:9px; cursor:pointer;';
-      b.textContent = '🎓 ' + s.nome;
-      b.onclick = ()=>{ devViewAsStudent(roomCode, s.matricula); };
-      list.appendChild(b);
-    });
-  });
-
-  panel.style.display = 'block';
-}
-
-function devViewAsTeacher(roomCode){
-  const room = rooms[roomCode];
-  state.role = 'professor';
-  state.teacherRoomCode = roomCode;
-  state.teacherName = room ? room.teacherName : state.teacherName;
-  document.getElementById('teacherAvatar').textContent = ((room && room.teacherName) || state.name || 'P')[0].toUpperCase();
-  document.getElementById('teacherAvatar2').textContent = ((room && room.teacherName) || state.name || 'P')[0].toUpperCase();
-  document.getElementById('teacherGreetName2').textContent = (room && room.teacherName) || state.name || '';
-  document.getElementById('devPanel').style.display = 'none';
-  renderTeacher();
-  switchScreen('screen-teacher');
-  buildNav('navTeacher','teacher');
-  updateDevToggle();
-}
-
-function devViewAsStudent(roomCode, matricula){
-  const room = rooms[roomCode];
-  room.students.forEach(s=>{ s.isMe = (s.matricula === matricula); });
-  state.role = 'aluno';
-  state.roomCode = roomCode;
-  state.myRoomCodes = state.myRoomCodes || [];
-  if(!state.myRoomCodes.includes(roomCode)) state.myRoomCodes.push(roomCode);
-  const me = room.students.find(s=>s.matricula === matricula);
-  state.name = me.nome;
-  document.getElementById('studentGreetName').textContent = me.nome;
-  document.getElementById('studentAvatar').textContent = me.nome[0].toUpperCase();
-  document.getElementById('devPanel').style.display = 'none';
-  renderHome();
-  switchScreen('screen-home');
-  buildNav('navStudent','home');
-  updateDevToggle();
-}
-
 function getMe(){
   const room = rooms[state.roomCode];
   if(!room) return null;
@@ -768,11 +656,6 @@ function pickRole(role){
   document.querySelectorAll('#rolePick button').forEach(b=>b.classList.remove('selected'));
   document.querySelector(`#rolePick button[data-role="${role}"]`).classList.add('selected');
   document.getElementById('alunoJoinArea').style.display = role === 'professor' ? 'none' : 'block';
-}
-
-function fillDemo(){
-  document.getElementById('loginName').value = state.role === 'professor' ? 'Bruna Andrade' : 'Kelvin Souza';
-  if(state.role !== 'professor'){ document.getElementById('loginRoomCode').value = 'MOLQ42'; }
 }
 
 function toggleSkipRoom(){
@@ -1107,7 +990,6 @@ async function resetPassword(){
 function switchScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  updateDevToggle();
 }
 
 function goTo(page){

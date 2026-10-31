@@ -130,7 +130,7 @@
       <div id="joinModalHandle" style="padding:10px 0; margin-bottom:6px; cursor:grab; display:flex; justify-content:center;"><div style="width:36px; height:4px; background:var(--gray-light); border-radius:4px;"></div></div>
       <p style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; margin-bottom:4px;">Entrar em uma turma</p>
       <p style="font-size:12.5px; color:var(--gray); margin-bottom:14px;">Peça o código ao professor da turma.</p>
-      <input type="text" id="joinModalInput" placeholder="Ex: MOLQ42" style="width:100%; padding:13px 15px; border-radius:14px; border:1px solid var(--gray-light); font-size:14.5px; font-family:inherit; text-transform:uppercase; margin-bottom:12px;">
+      <input type="text" id="joinModalInput" placeholder="Ex: ABCD12" style="width:100%; padding:13px 15px; border-radius:14px; border:1px solid var(--gray-light); font-size:14.5px; font-family:inherit; text-transform:uppercase; margin-bottom:12px;">
       <button class="btn btn-outline" style="margin-bottom:10px; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="openQrScanner()"><svg width="1.1em" height="1.1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg> Ler QR Code</button>
       <button class="btn btn-primary" onclick="confirmJoinModal()">Entrar</button>
       <button class="btn btn-outline" style="margin-top:8px;" onclick="closeJoinModal()">Cancelar</button>
@@ -517,13 +517,6 @@
   </div>
 
   <div class="toast" id="toast"></div>
-
-  <!-- MODO DE TESTE — troca de visão sem precisar logar de novo -->
-  <button id="devToggleBtn" onclick="toggleDevPanel()" style="position:absolute; left:14px; bottom:86px; width:44px; height:44px; border-radius:50%; background:var(--black); color:var(--orange); border:2px solid var(--orange); font-size:18px; cursor:pointer; z-index:45; display:none; align-items:center; justify-content:center;">🔀</button>
-  <div id="devPanel" style="display:none; position:absolute; left:14px; bottom:136px; background:var(--black); border-radius:16px; padding:10px; z-index:46; max-width:230px; max-height:280px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.4);">
-    <p style="color:#B9B9B9; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; padding:4px 6px 8px;">Modo de teste · ver como</p>
-    <div id="devPanelList"></div>
-  </div>
 
   <!-- QR CODE EM TELA CHEIA -->
   <div id="qrFullscreenOverlay" style="display:none; position:absolute; inset:0; background:#fff; z-index:60; flex-direction:column; align-items:center; justify-content:center; padding:30px;" onclick="closeQrFullscreen()">
