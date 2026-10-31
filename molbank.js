@@ -508,8 +508,11 @@ async function openQrScanner(){
   const video = document.getElementById('qrVideo');
   overlay.style.display = 'flex';
   try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('CAMERA_UNSUPPORTED');
+    if(typeof jsQR !== 'function') throw new Error('QR_READER_UNAVAILABLE');
     qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     video.srcObject = qrStream;
+    await video.play();
     qrScanning = true;
     requestAnimationFrame(scanQrFrame);
   } catch(err){
@@ -522,7 +525,7 @@ function scanQrFrame(){
   if(!qrScanning) return;
   const video = document.getElementById('qrVideo');
   const canvas = document.getElementById('qrCanvas');
-  if(video.readyState === video.HAVE_ENOUGH_DATA){
+  if(video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight){
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -544,6 +547,8 @@ function scanQrFrame(){
 function closeQrScanner(){
   qrScanning = false;
   if(qrStream){ qrStream.getTracks().forEach(t=>t.stop()); qrStream = null; }
+  const video = document.getElementById('qrVideo');
+  if(video) video.srcObject = null;
   document.getElementById('qrScannerOverlay').style.display = 'none';
 }
 
@@ -1584,7 +1589,8 @@ function openQrFullscreen(){
   if(!room) return;
   document.getElementById('qrFullscreenRoomName').textContent = room.name;
   document.getElementById('qrFullscreenCodeText').textContent = room.code;
-  renderRoomQR('qrFullscreenCode', room.code, 280);
+  const qrSize = Math.min(280, Math.floor(window.innerWidth * 0.7));
+  renderRoomQR('qrFullscreenCode', room.code, qrSize);
   document.getElementById('qrFullscreenOverlay').style.display = 'flex';
 }
 
