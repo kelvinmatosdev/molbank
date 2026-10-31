@@ -43,7 +43,12 @@
 
     <div class="field">
       <label>Senha</label>
-      <input type="password" id="loginPassword" placeholder="Mínimo de 6 caracteres" autocomplete="current-password" oninput="clearFieldError('loginPassword')">
+      <div class="password-input-wrap">
+        <input type="password" id="loginPassword" placeholder="Mínimo de 6 caracteres" autocomplete="current-password" oninput="clearFieldError('loginPassword')">
+        <button class="password-visibility" id="togglePasswordVisibility" type="button" onclick="togglePasswordVisibility()" aria-label="Mostrar senha" aria-controls="loginPassword" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
       <div class="field-error" id="loginPasswordError">Digite uma senha com pelo menos 6 caracteres.</div>
     </div>
     <div class="field-error" id="loginAuthError" role="alert" style="margin:0 0 10px;"></div>
