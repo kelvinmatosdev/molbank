@@ -62,6 +62,7 @@ const STORE_ITEMS = [
    ESTADO (memória da sessão, sem storage) — sistema de salas dinâmico
    ===================================================================== */
 let rooms = {}; // codigo -> {code, name, teacherName, students:[]}
+let teacherNotifHistoryVisible = false;
 // (turmas de cada professor agora são calculadas por nome via getMyTeacherRooms())
 
 function makeStudent(nome, matricula){
@@ -180,6 +181,92 @@ function getUnreadForTeacher(aviso){
 }
 function getTotalUnreadForTeacher(room){
   return getAvisos(room).reduce((sum,a)=>sum + getUnreadForTeacher(a), 0);
+}
+
+async function markTeacherNotificationsRead(){
+  const room = rooms[state.teacherRoomCode];
+  if(!room) return;
+  const seenAt = Date.now();
+  room.teacherAlertsSeenAt = seenAt;
+  const saves = [];
+  if(room.isCloud){
+    saves.push(firebaseApi().then(api=>api.updateRoomTeacherAlertsSeen(room.code, seenAt)));
+  }
+  getAvisos(room).forEach(aviso=>{
+    if(getUnreadForTeacher(aviso) <= 0) return;
+    aviso.teacherLastSeen = seenAt;
+    if(room.isCloud) saves.push(saveCloudAviso(room, aviso));
+  });
+  renderTeacher();
+  try{
+    await Promise.all(saves);
+    showToast('Notificações informativas marcadas como lidas.');
+  }catch(error){
+    showToast('Não consegui salvar a leitura. Confira a conexão e tente novamente.');
+  }
+}
+
+function toggleTeacherNotifHistory(){
+  teacherNotifHistoryVisible = !teacherNotifHistoryVisible;
+  const room = rooms[state.teacherRoomCode];
+  if(room) renderTeacherNotificationHistory(room);
+  const current = document.getElementById('teacherMissionAlerts');
+  const history = document.getElementById('teacherNotifHistory');
+  const button = document.querySelector('.teacher-notif-history-btn');
+  if(current) current.style.display = teacherNotifHistoryVisible ? 'none' : '';
+  if(history) history.style.display = teacherNotifHistoryVisible ? '' : 'none';
+  if(button){
+    button.classList.toggle('active', teacherNotifHistoryVisible);
+    button.textContent = teacherNotifHistoryVisible ? 'Voltar' : 'Histórico';
+  }
+}
+
+function renderTeacherNotificationHistory(room){
+  const container = document.getElementById('teacherNotifHistory');
+  if(!container) return;
+  const entries = [];
+  const requestTime = request=>typeof request.createdAt === 'number'
+    ? request.createdAt : request.createdAt?.toMillis?.() || 0;
+  (room.storeRequests || []).filter(request=>['aplicado', 'rejeitado', 'resgatado'].includes(request.status)).forEach(request=>{
+    const approved = request.status === 'aplicado' || request.status === 'resgatado';
+    const title = request.requestType === 'bonus'
+      ? `Aumento de +${Number(request.value).toFixed(1)} ${approved ? 'aprovado' : 'recusado'}`
+      : `${request.itemName} ${approved ? 'aprovado' : 'recusado'}`;
+    entries.push({time:request.decidedAt || requestTime(request), title, detail:`${request.studentName} · ${request.cost} mol-edas${approved ? '' : ' devolvidas'}`});
+  });
+  room.students.forEach(student=>{
+    (student.activity || []).filter(item=>/^Missão (autorizada|recusada|concluída):/.test(item.label || '')).forEach(item=>{
+      entries.push({time:item.ts || 0, title:item.label, detail:student.nome});
+    });
+  });
+  getAvisos(room).forEach(aviso=>{
+    (aviso.comments || []).filter(comment=>comment.autorRole === 'aluno').forEach(comment=>{
+      entries.push({time:comment.ts || 0, title:`Comentário em “${aviso.titulo}”`, detail:`${comment.autorNome}: ${comment.texto}`});
+    });
+  });
+  entries.sort((a,b)=>b.time-a.time);
+  container.innerHTML = '';
+  const heading = document.createElement('h3');
+  heading.className = 'teacher-notif-history-title';
+  heading.textContent = 'Histórico de notificações';
+  container.appendChild(heading);
+  if(!entries.length){
+    const empty = document.createElement('p');
+    empty.style.cssText = 'font-size:12px;color:var(--gray);text-align:center;padding:24px 8px;';
+    empty.textContent = 'Ainda não há notificações no histórico.';
+    container.appendChild(empty);
+    return;
+  }
+  entries.forEach(entry=>{
+    const card = document.createElement('div');
+    card.className = 'teacher-notif-history-card';
+    const title = document.createElement('strong');
+    title.textContent = entry.title;
+    const detail = document.createElement('span');
+    detail.textContent = `${entry.detail} · ${entry.time ? timeAgo(entry.time) : 'Data indisponível'}`;
+    card.append(title, detail);
+    container.appendChild(card);
+  });
 }
 function markAvisoSeenByTeacher(aviso){
   aviso.teacherLastSeen = Date.now();
@@ -1152,7 +1239,7 @@ function goTo(page){
   if(page==='home'){ renderHome(); switchScreen('screen-home'); buildNav('navStudent','home'); }
   if(page==='teacher'){ renderTeacher(); switchScreen('screen-teacher'); buildNav('navTeacher','teacher'); }
   if(page==='teacherStudents'){ renderTeacher(); switchScreen('screen-teacher-students'); buildNav('navTeacherStudents','students'); }
-  if(page==='teacherNotif'){ renderTeacher(); switchScreen('screen-teacher-notif'); buildNav('navTeacherNotif','notif'); }
+  if(page==='teacherNotif'){ teacherNotifHistoryVisible = false; renderTeacher(); switchScreen('screen-teacher-notif'); buildNav('navTeacherNotif','notif'); }
   if(page==='teacherFreq'){ renderFrequencia(); switchScreen('screen-teacher-freq'); buildNav('navTeacherFreq','freq'); }
   if(page==='teacherPerfil'){ renderTeacherPerfil(); switchScreen('screen-teacher-perfil'); buildNav('navTeacherPerfil','teacher'); }
   if(page==='sobre'){
@@ -2360,12 +2447,21 @@ function renderTeacher(){
   renderMissionOrderList('teacherMissionOrderResumo', room);
   const pendingStoreRequests = (room.storeRequests || []).filter(request=>request.status === 'pendente');
   const bonusRequests = room.students.filter(s=>s.storeBonusActive && s.storeBonusActive.status==='pendente');
-  const notifCount = queue.length + authorized.length + pendingStoreRequests.length + room.teacherAlerts.filter(a=>a.type==='compra').length + getTotalUnreadForTeacher(room);
+  const unreadPurchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && a.time > (room.teacherAlertsSeenAt || 0));
+  const unreadInformationalCount = unreadPurchaseAlerts.length + getTotalUnreadForTeacher(room);
+  const notifCount = queue.length + authorized.length + pendingStoreRequests.length + unreadInformationalCount;
   const badge = document.getElementById('teacherNotifBadge');
   if(badge){ badge.style.display = notifCount > 0 ? 'flex' : 'none'; badge.textContent = notifCount > 9 ? '9+' : notifCount; }
 
   const alerts = document.getElementById('teacherMissionAlerts');
   alerts.innerHTML = '';
+  if(unreadInformationalCount){
+    const readButton = document.createElement('button');
+    readButton.className = 'teacher-notif-read-btn';
+    readButton.textContent = 'Marcar notificações informativas como lidas';
+    readButton.onclick = markTeacherNotificationsRead;
+    alerts.appendChild(readButton);
+  }
 
   if(authorized.length){
     authorized.forEach(s=>{
@@ -2414,7 +2510,7 @@ function renderTeacher(){
     });
   }
 
-  const purchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra').slice(0,6);  purchaseAlerts.forEach(a=>{
+  const purchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && a.time > (room.teacherAlertsSeenAt || 0)).slice(0,6);  purchaseAlerts.forEach(a=>{
     const div = document.createElement('div');
     div.className = 'teacher-mission-alert';
     div.style.borderColor = 'rgba(46,196,182,.3)'; div.style.background = 'rgba(46,196,182,.07)';
@@ -2430,6 +2526,16 @@ function renderTeacher(){
     div.innerHTML = `<p>💬 ${getUnreadForTeacher(a)} comentário(s) novo(s) em "${a.titulo}"</p><button style="background:var(--blue);" onclick="closeRewardsManager(); openAvisoDetail(${a.id});">Ver</button>`;
     alerts.appendChild(div);
   });
+
+  renderTeacherNotificationHistory(room);
+  const historyPanel = document.getElementById('teacherNotifHistory');
+  const historyButton = document.querySelector('.teacher-notif-history-btn');
+  if(historyPanel) historyPanel.style.display = teacherNotifHistoryVisible ? '' : 'none';
+  if(alerts) alerts.style.display = teacherNotifHistoryVisible ? 'none' : '';
+  if(historyButton){
+    historyButton.classList.toggle('active', teacherNotifHistoryVisible);
+    historyButton.textContent = teacherNotifHistoryVisible ? 'Voltar' : 'Histórico';
+  }
 
   const container = document.getElementById('teacherStudentList');
   container.innerHTML = '';

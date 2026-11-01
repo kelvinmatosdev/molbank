@@ -220,6 +220,11 @@ async function updateMemberAvisosSeen(code, memberId, avisosSeen) {
   await updateDoc(doc(db, 'rooms', code, 'members', memberId), { avisosSeen });
 }
 
+async function updateRoomTeacherAlertsSeen(code, seenAt) {
+  requireUser();
+  await updateDoc(doc(db, 'rooms', code), { teacherAlertsSeenAt: seenAt });
+}
+
 async function getRoomAnnouncements(code) {
   const snapshot = await getDocs(collection(db, 'rooms', code, 'announcements'));
   return snapshot.docs.map((announcement) => ({ ...announcement.data(), id: Number(announcement.id) || announcement.id, comments: [] }));
@@ -449,6 +454,7 @@ window.molbankFirebase = {
   subscribeRoomMembers,
   updateMemberProgress,
   updateMemberAvisosSeen,
+  updateRoomTeacherAlertsSeen,
   getRoomAnnouncements,
   saveRoomAnnouncement,
   deleteRoomAnnouncement,

@@ -382,8 +382,8 @@
 
   <!-- TEACHER: NOTIFICAÇÕES -->
   <div class="screen" id="screen-teacher-notif">
-    <div class="topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Notificações</h2></div></div>
-    <div class="content"><div id="teacherMissionAlerts"></div></div>
+    <div class="topbar teacher-notif-topbar"><div class="greeting"><p><a style="color:var(--gray); font-size:11px; cursor:pointer;" onclick="goTo('teacher')">‹ Turma</a></p><h2>Notificações</h2></div><button class="teacher-notif-history-btn" onclick="toggleTeacherNotifHistory()">Histórico</button></div>
+    <div class="content"><div id="teacherMissionAlerts"></div><div id="teacherNotifHistory" style="display:none;"></div></div>
     <div class="bottomnav" id="navTeacherNotif"></div>
   </div>
 
