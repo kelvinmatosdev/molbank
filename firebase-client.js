@@ -280,18 +280,7 @@ function subscribeStoreBonusRequests(code, isTeacher, onChange, onError) {
   }, onError);
 }
 
-async function createStoreBonusRequest(code, request) {
-  const user = requireUser();
-  await addDoc(collection(db, 'rooms', code, 'storeRequests'), {
-    ...request,
-    memberUid: user.uid,
-    requestType: 'bonus',
-    status: 'pendente',
-    createdAt: Date.now(),
-  });
-}
-
-async function redeemStoreItem(code, memberId, { itemName, cost, activity }) {
+async function createStoreRequest(code, memberId, request, activity) {
   const user = requireUser();
   if (user.uid !== memberId) throw new Error('NOT_YOUR_MEMBER_RECORD');
   const memberRef = doc(db, 'rooms', code, 'members', memberId);
@@ -301,6 +290,7 @@ async function redeemStoreItem(code, memberId, { itemName, cost, activity }) {
     const memberSnapshot = await transaction.get(memberRef);
     if (!memberSnapshot.exists()) throw new Error('MEMBER_NOT_FOUND');
     const currentBalance = Number(memberSnapshot.data().coins) || 0;
+    const cost = Number(request.cost) || 0;
     if (currentBalance < cost) throw new Error('INSUFFICIENT_BALANCE');
     newBalance = currentBalance - cost;
     transaction.update(memberRef, {
@@ -309,12 +299,10 @@ async function redeemStoreItem(code, memberId, { itemName, cost, activity }) {
       lastStoreRequestId: requestRef.id,
     });
     transaction.set(requestRef, {
-      requestType: 'purchase',
+      ...request,
       memberUid: user.uid,
       studentName: memberSnapshot.data().nome,
-      itemName,
-      cost,
-      status: 'resgatado',
+      status: 'pendente',
       createdAt: serverTimestamp(),
     });
   });
@@ -330,7 +318,25 @@ async function resolveStoreBonusRequest(code, requestId, memberId, progress, sta
     if (!requestSnapshot.exists() || requestSnapshot.data().status !== 'pendente') {
       throw new Error('REQUEST_ALREADY_RESOLVED');
     }
-    if (status === 'aplicado') transaction.update(memberRef, { ...progress, updatedAt: serverTimestamp() });
+    if (status === 'aplicado' && progress) transaction.update(memberRef, { ...progress, updatedAt: serverTimestamp() });
+    if (status === 'rejeitado') {
+      const memberSnapshot = await transaction.get(memberRef);
+      if (!memberSnapshot.exists()) throw new Error('MEMBER_NOT_FOUND');
+      const member = memberSnapshot.data();
+      const cost = Number(requestSnapshot.data().cost) || 0;
+      transaction.update(memberRef, {
+        coins: (Number(member.coins) || 0) + cost,
+        nota: Number(member.nota) || 0,
+        notaHistory: Array.isArray(member.notaHistory) ? member.notaHistory : [],
+        categorias: member.categorias || {},
+        activity: [{ label: 'Pedido recusado: ' + (requestSnapshot.data().itemName || 'aumento de nota'), amount: cost, pos: true, icon: '↩️', ts: Date.now() }, ...(member.activity || [])].slice(0, 25),
+        mission: member.mission || null,
+        attendanceHistory: Array.isArray(member.attendanceHistory) ? member.attendanceHistory.slice(0, 400) : [],
+        freqMarkedToday: member.freqMarkedToday || null,
+        freqMarkedDate: member.freqMarkedDate || null,
+        updatedAt: serverTimestamp(),
+      });
+    }
     transaction.update(requestRef, { status, decidedAt: Date.now() });
   });
 }
@@ -452,8 +458,7 @@ window.molbankFirebase = {
   deleteAnnouncementComment,
   requestMemberMission,
   subscribeStoreBonusRequests,
-  createStoreBonusRequest,
-  redeemStoreItem,
+  createStoreRequest,
   resolveStoreBonusRequest,
   loadRoomBundle,
   listTeacherRooms,

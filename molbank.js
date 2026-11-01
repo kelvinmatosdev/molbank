@@ -916,8 +916,9 @@ function watchCloudStoreBonusRequests(code){
     const requestTime = request=>typeof request.createdAt === 'number'
       ? request.createdAt
       : request.createdAt?.toMillis?.() || 0;
+    room.storeRequests = requests;
     room.teacherAlerts = requests
-      .filter(request=>request.requestType === 'purchase')
+      .filter(request=>request.requestType === 'purchase' && request.status === 'aplicado')
       .sort((a,b)=>requestTime(b)-requestTime(a))
       .map(request=>({
         type:'compra', matricula:request.memberUid, nome:request.studentName,
@@ -929,6 +930,11 @@ function watchCloudStoreBonusRequests(code){
       if(!latestByStudent.has(request.memberUid)) latestByStudent.set(request.memberUid, request);
     });
     room.students.forEach(student=>{
+      student.storePendingPurchases = requests.filter(request=>request.memberUid === student.uid
+        && request.requestType === 'purchase' && request.status === 'pendente');
+      student.storeRecentPurchases = requests.filter(request=>request.memberUid === student.uid
+        && request.requestType === 'purchase' && ['aplicado', 'rejeitado'].includes(request.status))
+        .sort((a,b)=>requestTime(b)-requestTime(a)).slice(0, 3);
       const request = latestByStudent.get(student.uid);
       if(!request || request.status === 'rejeitado'
         || (request.status === 'aplicado' && student.notaHistory?.[0]?.id !== request.latestNoteId)){
@@ -1440,6 +1446,25 @@ function renderStore(){
   }
   document.getElementById('lojaBalance').textContent = me.coins + ' mol-edas';
   content.innerHTML = '';
+  const approvalHint = document.createElement('p');
+  approvalHint.style.cssText = 'font-size:11.5px; color:var(--gray); margin:0 0 12px; line-height:1.5;';
+  approvalHint.textContent = 'Todos os resgates precisam da aprovação do professor. O valor fica reservado até a decisão.';
+  content.appendChild(approvalHint);
+  (me.storeRecentPurchases || []).forEach(request=>{
+    const notice = document.createElement('p');
+    const rejected = request.status === 'rejeitado';
+    notice.style.cssText = `font-size:11.5px; background:${rejected?'rgba(220,70,70,.1)':'rgba(63,182,95,.1)'}; color:${rejected?'var(--red)':'var(--green)'}; padding:10px 12px; border-radius:12px; margin-bottom:8px; font-weight:600; line-height:1.5;`;
+    notice.textContent = rejected
+      ? `O professor recusou ${request.itemName}; ${request.cost} mol-edas foram devolvidas.`
+      : `O professor aprovou ${request.itemName}.`;
+    content.appendChild(notice);
+  });
+  (me.storePendingPurchases || []).filter(request=>request.status === 'pendente').forEach(request=>{
+    const notice = document.createElement('p');
+    notice.style.cssText = 'font-size:11.5px; background:rgba(59,125,240,.1); color:var(--blue); padding:10px 12px; border-radius:12px; margin-bottom:8px; font-weight:600; line-height:1.5;';
+    notice.textContent = `Pedido de ${request.itemName} aguardando aprovação. ${request.cost} mol-edas estão reservadas.`;
+    content.appendChild(notice);
+  });
   if(me.storeBonusActive){
     const entryIdx = (me.notaHistory||[]).findIndex(h=>h.id === me.storeBonusActive.entryId);
     const entry = entryIdx > -1 ? me.notaHistory[entryIdx] : null;
@@ -1448,7 +1473,7 @@ function renderStore(){
     const isPending = me.storeBonusActive.status === 'pendente';
     notice.style.cssText = `font-size:11.5px; background:${isPending?'rgba(59,125,240,.1)':'rgba(63,182,95,.1)'}; color:${isPending?'var(--blue)':'var(--green)'}; padding:10px 12px; border-radius:12px; margin-bottom:14px; font-weight:600; line-height:1.5;`;
     notice.textContent = isPending
-      ? `Pedido de +${me.storeBonusActive.value.toFixed(1)} na ${label} aguardando aprovação. As mol-edas serão cobradas se o professor aprovar.`
+      ? `Pedido de +${me.storeBonusActive.value.toFixed(1)} na ${label} aguardando aprovação. ${me.storeBonusActive.cost} mol-edas estão reservadas.`
       : `+${me.storeBonusActive.value.toFixed(1)} aplicado na ${label}. Só dá pra pedir outro depois que o professor lançar a próxima nota.`;
     content.appendChild(notice);
   } else if(!me.notaHistory || me.notaHistory.length === 0){
@@ -1466,9 +1491,10 @@ function renderStore(){
     const isBonusItem = item.bonusValue !== undefined;
     const blockedByExistingBonus = isBonusItem && !!me.storeBonusActive;
     const blockedByNoHistory = isBonusItem && (!me.notaHistory || me.notaHistory.length === 0);
-    const canBuy = me.coins >= item.cost && !blockedByExistingBonus && !blockedByNoHistory;
+    const pendingItem = (me.storePendingPurchases || []).some(request=>request.status === 'pendente' && request.itemName === item.name);
+    const canBuy = me.coins >= item.cost && !blockedByExistingBonus && !blockedByNoHistory && !pendingItem;
     const row = document.createElement('div'); row.className = 'store-item';
-    row.innerHTML = `<div class="store-ic">${item.icon}</div><div class="store-info"><p>${item.name}</p><span>${item.desc}</span></div><button class="store-buy" ${canBuy?'':'disabled'} onclick="buyItem(${idx})">${blockedByExistingBonus||blockedByNoHistory ? 'Indisponível' : canBuy ? item.cost + ' mol' : 'Sem saldo'}</button>`;
+    row.innerHTML = `<div class="store-ic">${item.icon}</div><div class="store-info"><p>${item.name}</p><span>${item.desc}</span></div><button class="store-buy" ${canBuy?'':'disabled'} onclick="buyItem(${idx})">${pendingItem ? 'Aguardando' : blockedByExistingBonus||blockedByNoHistory ? 'Indisponível' : canBuy ? item.cost + ' mol' : 'Sem saldo'}</button>`;
     content.appendChild(row);
   });
 }
@@ -1487,18 +1513,16 @@ async function buyItem(idx){
 
   const room = rooms[state.roomCode];
   if(room?.isCloud){
-    const activity = {label:'Resgate: ' + item.name, amount:-item.cost, pos:false, icon:'🎁', ts:Date.now()};
+    const activity = {label:'Pedido de resgate: ' + item.name, amount:-item.cost, pos:false, icon:'🎁', ts:Date.now()};
     try{
       const api = await firebaseApi();
-      me.coins = await api.redeemStoreItem(state.roomCode, me.uid, {
+      me.coins = await api.createStoreRequest(state.roomCode, me.uid, {
+        requestType:'purchase',
         itemName:item.name,
         cost:item.cost,
-        activity,
-      });
-      if(!(me.activity||[]).some(entry=>entry.ts === activity.ts && entry.label === activity.label)){
-        me.activity = [activity, ...(me.activity||[])].slice(0,25);
-      }
-      showToast('Resgatado: ' + item.name);
+      }, activity);
+      me.activity = [activity, ...(me.activity||[])].slice(0,25);
+      showToast('Pedido enviado para aprovação do professor');
       renderStore();
       renderHome();
     }catch(error){
@@ -1508,12 +1532,12 @@ async function buyItem(idx){
     }
     return;
   }
-
+  const request = {id:'local-' + Date.now(), requestType:'purchase', memberUid:me.uid || me.matricula, studentName:me.nome, itemName:item.name, cost:item.cost, status:'pendente', createdAt:Date.now()};
   me.coins -= item.cost;
-  logActivity(me, 'Resgate: ' + item.name, -item.cost, '🎁');
-  room.teacherAlerts = room.teacherAlerts || [];
-  room.teacherAlerts.unshift({ type:'compra', matricula: me.matricula, nome: me.nome, detail: item.name, cost: item.cost, time: Date.now() });
-  showToast('Resgatado: ' + item.name);
+  me.storePendingPurchases = [...(me.storePendingPurchases || []), request];
+  room.storeRequests = [...(room.storeRequests || []), request];
+  logActivity(me, 'Pedido de resgate: ' + item.name, -item.cost, '🎁');
+  showToast('Pedido enviado para aprovação do professor');
   renderStore();
   renderHome();
 }
@@ -1547,14 +1571,18 @@ async function confirmNotaPicker(itemIdx, entryId){
     renderStore();
     try{
       const api = await firebaseApi();
-      await api.createStoreBonusRequest(state.roomCode, {
+      const activity = {label:'Pedido de aumento: +' + item.bonusValue.toFixed(1), amount:-item.cost, pos:false, icon:'📈', ts:Date.now()};
+      me.coins = await api.createStoreRequest(state.roomCode, me.uid, {
+        requestType:'bonus',
         entryId,
         latestNoteId:me.notaHistory[0].id,
         value:item.bonusValue,
         cost:item.cost,
-        studentName:me.nome,
-      });
+      }, activity);
+      me.activity = [activity, ...(me.activity||[])].slice(0,25);
       showToast('Pedido enviado pro professor aprovar');
+      renderStore();
+      renderHome();
     }catch(error){
       me.storeBonusActive = null;
       renderStore();
@@ -1568,7 +1596,10 @@ async function confirmNotaPicker(itemIdx, entryId){
   me.storeBonusActive = { entryId, value: item.bonusValue, status: 'pendente', requestedAt: Date.now() };
   const entryIdx = me.notaHistory.findIndex(h=>h.id === entryId);
   const label = entryIdx > -1 ? provaLabel(me, entryIdx) : '';
-  logActivity(me, 'Pediu ' + item.name + ' na ' + label, -item.cost, '📈');
+  const request = {id:'local-' + Date.now(), requestType:'bonus', memberUid:me.uid || me.matricula, studentName:me.nome, entryId, latestNoteId:me.notaHistory[0].id, value:item.bonusValue, cost:item.cost, itemName:item.name, status:'pendente', createdAt:Date.now()};
+  me.storeBonusActive.requestId = request.id;
+  room.storeRequests = [...(room.storeRequests || []), request];
+  logActivity(me, 'Pedido de aumento: ' + item.name + ' na ' + label, -item.cost, '📈');
   closeNotaPicker();
   showToast('Pedido enviado pro professor aprovar');
   renderStore();
@@ -2327,8 +2358,9 @@ function renderTeacher(){
   document.getElementById('teacherStudentCount').textContent = room.students.length;
   document.getElementById('teacherPendingCount').textContent = queue.length;
   renderMissionOrderList('teacherMissionOrderResumo', room);
+  const pendingStoreRequests = (room.storeRequests || []).filter(request=>request.status === 'pendente');
   const bonusRequests = room.students.filter(s=>s.storeBonusActive && s.storeBonusActive.status==='pendente');
-  const notifCount = queue.length + authorized.length + bonusRequests.length + room.teacherAlerts.filter(a=>a.type==='compra').length + getTotalUnreadForTeacher(room);
+  const notifCount = queue.length + authorized.length + pendingStoreRequests.length + room.teacherAlerts.filter(a=>a.type==='compra').length + getTotalUnreadForTeacher(room);
   const badge = document.getElementById('teacherNotifBadge');
   if(badge){ badge.style.display = notifCount > 0 ? 'flex' : 'none'; badge.textContent = notifCount > 9 ? '9+' : notifCount; }
 
@@ -2351,17 +2383,22 @@ function renderTeacher(){
     });
   }
 
-  if(bonusRequests.length){
-    bonusRequests.forEach(s=>{
-      const entryIdx = s.notaHistory.findIndex(h=>h.id === s.storeBonusActive.entryId);
-      const entry = entryIdx > -1 ? s.notaHistory[entryIdx] : null;
-      const label = entry ? provaLabel(s, entryIdx) : '—';
+  if(pendingStoreRequests.length){
+    pendingStoreRequests.forEach(request=>{
+      const student = room.students.find(item=>item.uid === request.memberUid);
       const div = document.createElement('div');
       div.className = 'teacher-mission-alert';
       div.style.borderColor = 'rgba(59,125,240,.3)'; div.style.background = 'rgba(59,125,240,.08)';
-      div.innerHTML = `<p>${s.nome} pediu <b>+${s.storeBonusActive.value.toFixed(1)}</b> na ${label} (${entry?entry.nota.toFixed(1):'—'})</p>
-        <button style="background:var(--blue);" onclick="approveBonus('${s.matricula}')">Aprovar</button>
-        <button style="background:var(--red); margin-left:6px;" onclick="rejectBonus('${s.matricula}')">Recusar</button>`;
+      let detail = `<b>${request.itemName}</b> (${request.cost} mol-edas)`;
+      if(request.requestType === 'bonus'){
+        const entryIdx = (student?.notaHistory || []).findIndex(h=>h.id === request.entryId);
+        const entry = entryIdx > -1 ? student.notaHistory[entryIdx] : null;
+        const label = entry ? provaLabel(student, entryIdx) : 'nota selecionada';
+        detail = `<b>+${Number(request.value).toFixed(1)}</b> na ${label} (${entry ? entry.nota.toFixed(1) : '—'}) · ${request.cost} mol-edas`;
+      }
+      div.innerHTML = `<p>${request.studentName} pediu ${detail}</p>
+        <button style="background:var(--blue);" onclick="approveStoreRequest('${request.id}')">Aprovar</button>
+        <button style="background:var(--red); margin-left:6px;" onclick="rejectStoreRequest('${request.id}')">Recusar</button>`;
       alerts.appendChild(div);
     });
   }
@@ -2680,6 +2717,10 @@ function deleteNotaEntry(matricula, entryId){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s) return;
+  if(s.storeBonusActive?.status === 'pendente' && s.storeBonusActive.entryId === entryId){
+    showToast('Resolva o pedido de aumento antes de excluir esta nota.');
+    return;
+  }
   const entry = s.notaHistory.find(h=>h.id===entryId);
   if(!entry) return;
   s.coins = Math.max(0, s.coins - entry.mol);
@@ -2776,11 +2817,8 @@ function adjustCategory(matricula, catKey, value){
 
 function clearBonusOnNewNota(s){
   if(!s.storeBonusActive) return;
-  if(s.storeBonusActive.status === 'pendente'){
-    const item = STORE_ITEMS.find(it=>it.bonusValue === s.storeBonusActive.value);
-    if(item) s.coins += item.cost;
-    logActivity(s, 'Pedido de aumento cancelado (nova nota lançada) — mol-edas devolvidas', item?item.cost:0, '↩️');
-  }
+  // O valor já foi reservado; só o professor pode decidir e, se recusar, devolver.
+  if(s.storeBonusActive.status === 'pendente') return;
   s.storeBonusActive = null;
 }
 
@@ -2850,32 +2888,7 @@ async function approveBonus(matricula){
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s || !s.storeBonusActive) return;
   if(room.isCloud && s.storeBonusActive.requestId){
-    const request = s.storeBonusActive;
-    const cost = request.cost || STORE_ITEMS.find(it=>it.bonusValue === request.value)?.cost || 0;
-    if(s.coins < cost){ showToast(s.nome + ' não tem saldo suficiente para esse pedido'); return; }
-    const history = (s.notaHistory||[]).map(entry=>({...entry}));
-    const entry = history.find(item=>item.id === request.entryId);
-    if(!entry){ showToast('A nota selecionada não existe mais'); return; }
-    entry.bonus = (entry.bonus||0) + request.value;
-    const activity = [{label:'Aumento de nota aprovado: +' + request.value.toFixed(1), amount:-cost, pos:false, icon:'📈', ts:Date.now()}, ...(s.activity||[])].slice(0,25);
-    const progress = {
-      coins:Math.max(0, s.coins-cost), nota:s.nota, notaHistory:history,
-      categorias:s.categorias||{}, activity,
-      freqMarkedToday:s.freqMarkedToday||null,
-      freqMarkedDate:s.freqMarkedDate||null,
-      attendanceHistory:Array.isArray(s.attendanceHistory) ? s.attendanceHistory.slice(0, 400) : [],
-    };
-    try{
-      const api = await firebaseApi();
-      await api.resolveStoreBonusRequest(state.teacherRoomCode, request.requestId, s.uid, progress, 'aplicado');
-      Object.assign(s, progress, {storeBonusActive:{...request, status:'aplicado'}});
-      renderTeacher();
-      showToast('Aumento aprovado para ' + s.nome + ' · ' + cost + ' mol-edas');
-    }catch(error){
-      showToast(error.message === 'REQUEST_ALREADY_RESOLVED'
-        ? 'Esse pedido já foi resolvido em outro aparelho.'
-        : 'Não consegui aprovar no Firebase. Confira a conexão e as regras.');
-    }
+    await approveStoreRequest(s.storeBonusActive.requestId);
     return;
   }
   const entry = s.notaHistory.find(h=>h.id === s.storeBonusActive.entryId);
@@ -2891,18 +2904,7 @@ async function rejectBonus(matricula){
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s || !s.storeBonusActive) return;
   if(room.isCloud && s.storeBonusActive.requestId){
-    const request = s.storeBonusActive;
-    try{
-      const api = await firebaseApi();
-      await api.resolveStoreBonusRequest(state.teacherRoomCode, request.requestId, s.uid, null, 'rejeitado');
-      s.storeBonusActive = null;
-      renderTeacher();
-      showToast('Pedido recusado para ' + s.nome + '. Nenhuma mol-eda foi cobrada.');
-    }catch(error){
-      showToast(error.message === 'REQUEST_ALREADY_RESOLVED'
-        ? 'Esse pedido já foi resolvido em outro aparelho.'
-        : 'Não consegui recusar no Firebase. Confira a conexão e as regras.');
-    }
+    await rejectStoreRequest(s.storeBonusActive.requestId);
     return;
   }
   const item = STORE_ITEMS.find(it=>it.bonusValue === s.storeBonusActive.value);
@@ -2912,6 +2914,83 @@ async function rejectBonus(matricula){
   s.storeBonusActive = null;
   renderTeacher();
   showToast('Recusado e mol-edas devolvidas para ' + s.nome);
+}
+
+async function approveStoreRequest(requestId){
+  const room = rooms[state.teacherRoomCode];
+  const request = room?.storeRequests?.find(item=>item.id === requestId);
+  if(!room || !request || request.status !== 'pendente') return;
+  const student = room.students.find(item=>item.uid === request.memberUid);
+  const targetStudent = student || room.students.find(item=>item.matricula === request.memberUid);
+  if(!targetStudent){ showToast('Não encontrei o aluno deste pedido.'); return; }
+  if(!room.isCloud){
+    if(request.requestType === 'bonus'){
+      const entry = targetStudent.notaHistory.find(item=>item.id === request.entryId);
+      if(!entry){ showToast('A nota selecionada não existe mais.'); return; }
+      entry.bonus = (entry.bonus || 0) + Number(request.value);
+      targetStudent.storeBonusActive = {...targetStudent.storeBonusActive, status:'aplicado'};
+    }
+    request.status = 'aplicado';
+    renderTeacher();
+    showToast('Pedido aprovado para ' + targetStudent.nome);
+    return;
+  }
+  let progress = null;
+  if(request.requestType === 'bonus'){
+    const history = (targetStudent.notaHistory || []).map(entry=>({...entry}));
+    const entry = history.find(item=>item.id === request.entryId);
+    if(!entry){ showToast('A nota selecionada não existe mais.'); return; }
+    entry.bonus = (entry.bonus || 0) + Number(request.value);
+    progress = {
+      coins:targetStudent.coins, nota:targetStudent.nota, notaHistory:history,
+      categorias:targetStudent.categorias || {}, activity:targetStudent.activity || [],
+      freqMarkedToday:targetStudent.freqMarkedToday || null,
+      freqMarkedDate:targetStudent.freqMarkedDate || null,
+      attendanceHistory:Array.isArray(targetStudent.attendanceHistory) ? targetStudent.attendanceHistory.slice(0, 400) : [],
+    };
+  }
+  try{
+    const api = await firebaseApi();
+    await api.resolveStoreBonusRequest(state.teacherRoomCode, request.id, targetStudent.uid, progress, 'aplicado');
+    request.status = 'aplicado';
+    if(progress) Object.assign(targetStudent, progress, {storeBonusActive:{...targetStudent.storeBonusActive, status:'aplicado'}});
+    renderTeacher();
+    showToast(request.requestType === 'bonus' ? 'Aumento de nota aprovado para ' + targetStudent.nome : 'Resgate aprovado para ' + targetStudent.nome);
+  }catch(error){
+    showToast(error.message === 'REQUEST_ALREADY_RESOLVED'
+      ? 'Esse pedido já foi resolvido em outro aparelho.'
+      : 'Não consegui aprovar no Firebase. Confira a conexão e as regras.');
+  }
+}
+
+async function rejectStoreRequest(requestId){
+  const room = rooms[state.teacherRoomCode];
+  const request = room?.storeRequests?.find(item=>item.id === requestId);
+  if(!room || !request || request.status !== 'pendente') return;
+  const student = room.students.find(item=>item.uid === request.memberUid);
+  const targetStudent = student || room.students.find(item=>item.matricula === request.memberUid);
+  if(!targetStudent){ showToast('Não encontrei o aluno deste pedido.'); return; }
+  if(!room.isCloud){
+    targetStudent.coins += Number(request.cost) || 0;
+    logActivity(targetStudent, 'Pedido recusado: ' + (request.itemName || 'aumento de nota'), Number(request.cost) || 0, '↩️');
+    request.status = 'rejeitado';
+    if(request.requestType === 'bonus') targetStudent.storeBonusActive = null;
+    renderTeacher();
+    showToast('Pedido recusado; saldo devolvido para ' + targetStudent.nome);
+    return;
+  }
+  try{
+    const api = await firebaseApi();
+    await api.resolveStoreBonusRequest(state.teacherRoomCode, request.id, targetStudent.uid, null, 'rejeitado');
+    request.status = 'rejeitado';
+    if(request.requestType === 'bonus') targetStudent.storeBonusActive = null;
+    renderTeacher();
+    showToast('Pedido recusado para ' + targetStudent.nome + '; saldo devolvido.');
+  }catch(error){
+    showToast(error.message === 'REQUEST_ALREADY_RESOLVED'
+      ? 'Esse pedido já foi resolvido em outro aparelho.'
+      : 'Não consegui recusar no Firebase. Confira a conexão e as regras.');
+  }
 }
 
 /* =====================================================================
