@@ -183,6 +183,11 @@
   .settings-row .tag{ font-size:10px; color:var(--gray); font-weight:700; background:var(--surface); padding:3px 8px; border-radius:8px; }
   .settings-row .chevron{ font-size:13px; color:var(--gray); }
   .settings-row.danger .lbl{ color:var(--red); }
+  .account-value{ min-height:44px; display:flex; align-items:center; gap:8px; padding:12px 14px; border-radius:14px; background:var(--gray-light); color:var(--text-primary); font-size:14px; overflow-wrap:anywhere; }
+  .account-email-row{justify-content:space-between;}
+  .account-hint{font-size:11px; color:var(--gray);}
+  .account-actions{display:flex; gap:8px; margin-top:8px;}
+  .account-actions .btn{flex:1; padding:11px 8px;}
   .profile-room-card div{flex:1;}
   .profile-room-card p{font-size:13px; font-weight:600;}
   .profile-room-card span{font-size:11px; color:var(--gray);}

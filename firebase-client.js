@@ -1,11 +1,14 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   getAuth,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile,
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
@@ -70,6 +73,20 @@ async function signIn(email, password) {
 
 async function sendPasswordReset(email) {
   return sendPasswordResetEmail(auth, email);
+}
+
+async function reauthenticateAccount(currentPassword) {
+  const user = requireUser();
+  if (!user.email) throw new Error('EMAIL_SIGN_IN_REQUIRED');
+  const credential = EmailAuthProvider.credential(user.email, currentPassword);
+  await reauthenticateWithCredential(user, credential);
+  return user.email;
+}
+
+async function changeAccountPassword(currentPassword, newPassword) {
+  if (String(newPassword || '').length < 6) throw new Error('WEAK_ACCOUNT_PASSWORD');
+  await reauthenticateAccount(currentPassword);
+  await updatePassword(requireUser(), newPassword);
 }
 
 async function updateAccountName(name, role, roomCodes = []) {
@@ -353,6 +370,8 @@ window.molbankFirebase = {
   signIn,
   signOut: () => signOut(auth),
   sendPasswordReset,
+  reauthenticateAccount,
+  changeAccountPassword,
   updateAccountName,
   onAuthStateChanged: (callback) => onAuthStateChanged(auth, callback),
   getProfile: async (uid) => {

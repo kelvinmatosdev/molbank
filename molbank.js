@@ -540,8 +540,9 @@ function closeGenericConfirm(){
 }
 
 function executeGenericConfirm(){
-  if(genericConfirmCallback) genericConfirmCallback();
+  const callback = genericConfirmCallback;
   closeGenericConfirm();
+  if(callback) callback();
 }
 
 let state = { role:'aluno', name:'', teacherName:'', roomCode:'', teacherRoomCode:'', expandedStudent:null, selectMode:false, selectedStudents:[], bulkCategory:'fardamento', myRoomCodes:[] };
@@ -704,7 +705,7 @@ async function saveTeacherProfile(){
   if(teacherAvatar) teacherAvatar.textContent = newName[0].toUpperCase();
   document.getElementById('teacherProfileAvatarBig').textContent = newName[0].toUpperCase();
   renderTeacherRooms();
-  showToast('Nome atualizado e salvo no Firebase');
+  showToast('Nome atualizado.');
 }
 
 function getMe(){
@@ -782,6 +783,9 @@ function setAuthMessage(message){
 
 function firebaseErrorMessage(error){
   const code = error?.code || error?.message || '';
+  if(code.includes('requires-recent-login')) return 'Sua sessão expirou para essa ação. Entre novamente e tente de novo.';
+  if(code.includes('EMAIL_SIGN_IN_REQUIRED')) return 'Esta ação exige uma conta com e-mail e senha.';
+  if(code.includes('WEAK_ACCOUNT_PASSWORD')) return 'A senha precisa ter pelo menos 6 caracteres.';
   if(code.includes('email-already-in-use')) return 'Esse e-mail já tem uma conta. Toque em “Entrar”.';
   if(code.includes('invalid-email')) return 'Esse e-mail parece inválido. Confere se foi digitado certo.';
   if(code.includes('weak-password')) return 'A senha precisa ter pelo menos 6 caracteres.';
@@ -1150,6 +1154,11 @@ function goTo(page){
     switchScreen('screen-config');
     buildNav('navConfig', state.role==='professor' ? 'teacher' : 'perfil');
   }
+  if(page==='dadosConta'){
+    renderAccountData();
+    switchScreen('screen-dados-conta');
+    buildNav('navDadosConta', state.role==='professor' ? 'teacher' : 'perfil');
+  }
   if(page==='avisos'){
     renderAvisosLista();
     switchScreen('screen-avisos');
@@ -1181,7 +1190,11 @@ function applyTheme(){
   if(icon) icon.textContent = currentTheme === 'escuro' ? '🌙' : '☀️';
 }
 
-async function logoutToLogin(){
+function logoutToLogin(){
+  showGenericConfirm('Sair da conta?', 'Tem certeza de que deseja sair? Você precisará entrar novamente para acessar sua conta.', completeLogoutFromSettings);
+}
+
+async function completeLogoutFromSettings(){
   try{
     if(window.molbankFirebase) await window.molbankFirebase.signOut();
   } catch(error){
@@ -1843,7 +1856,69 @@ async function saveProfile(){
   document.getElementById('studentAvatar').textContent = newName[0].toUpperCase();
   renderPerfil();
   renderHome();
-  showToast('Nome atualizado e salvo no Firebase');
+  showToast('Nome atualizado.');
+}
+
+let accountEmailIsVisible = false;
+
+function renderAccountData(){
+  const email = String(state.email || '');
+  const parts = email.split('@');
+  const maskedEmail = parts.length === 2 ? `••••••@${parts[1]}` : '••••••••';
+  accountEmailIsVisible = false;
+  document.getElementById('accountNameValue').textContent = state.name || '—';
+  document.getElementById('accountEmailValue').textContent = maskedEmail;
+  document.getElementById('accountEmailToggle').textContent = 'Mostrar';
+  document.getElementById('accountEmailVerify').style.display = 'none';
+  document.getElementById('accountEmailPassword').value = '';
+}
+
+function toggleAccountEmail(){
+  if(accountEmailIsVisible){
+    renderAccountData();
+    return;
+  }
+  document.getElementById('accountEmailVerify').style.display = 'block';
+  document.getElementById('accountEmailPassword').focus();
+}
+
+function cancelRevealAccountEmail(){
+  document.getElementById('accountEmailVerify').style.display = 'none';
+  document.getElementById('accountEmailPassword').value = '';
+}
+
+async function confirmRevealAccountEmail(){
+  const password = document.getElementById('accountEmailPassword').value;
+  if(!password){ showToast('Digite sua senha para continuar.'); return; }
+  try{
+    const api = await firebaseApi();
+    const email = await api.reauthenticateAccount(password);
+    accountEmailIsVisible = true;
+    document.getElementById('accountEmailValue').textContent = email;
+    document.getElementById('accountEmailToggle').textContent = 'Ocultar';
+    cancelRevealAccountEmail();
+  }catch(error){
+    showToast(firebaseErrorMessage(error));
+  }
+}
+
+async function changeAccountPassword(){
+  const currentPassword = document.getElementById('currentAccountPassword').value;
+  const newPassword = document.getElementById('newAccountPassword').value;
+  const confirmPassword = document.getElementById('confirmAccountPassword').value;
+  if(!currentPassword || !newPassword || !confirmPassword){ showToast('Preencha os três campos de senha.'); return; }
+  if(newPassword.length < 6){ showToast('A nova senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(newPassword !== confirmPassword){ showToast('A confirmação da nova senha não confere.'); return; }
+  try{
+    const api = await firebaseApi();
+    await api.changeAccountPassword(currentPassword, newPassword);
+    document.getElementById('currentAccountPassword').value = '';
+    document.getElementById('newAccountPassword').value = '';
+    document.getElementById('confirmAccountPassword').value = '';
+    showToast('Senha alterada.');
+  }catch(error){
+    showToast(firebaseErrorMessage(error));
+  }
 }
 
 function leaveRoomCode(code){
