@@ -1194,7 +1194,51 @@ function logoutToLogin(){
   showGenericConfirm('Sair da conta?', 'Tem certeza de que deseja sair? Você precisará entrar novamente para acessar sua conta.', completeLogoutFromSettings);
 }
 
-async function completeLogoutFromSettings(){
+function beginDeleteAccount(){
+  const warning = state.role === 'professor'
+    ? 'Sua conta e todas as suas turmas serão excluídas, incluindo alunos, notas, mol-edas, avisos e pedidos. Essa ação não pode ser desfeita.'
+    : 'Sua conta, seus dados nas turmas, seus pedidos e seus comentários serão excluídos. Essa ação não pode ser desfeita.';
+  showGenericConfirm('Excluir conta permanentemente?', warning, openDeleteAccountModal);
+}
+
+function openDeleteAccountModal(){
+  document.getElementById('deleteAccountPassword').value = '';
+  document.getElementById('deleteAccountConfirmButton').disabled = false;
+  document.getElementById('deleteAccountConfirmButton').textContent = 'Excluir conta';
+  document.getElementById('deleteAccountOverlay').style.display = 'flex';
+  document.getElementById('deleteAccountPassword').focus();
+}
+
+function closeDeleteAccountModal(){
+  document.getElementById('deleteAccountOverlay').style.display = 'none';
+  document.getElementById('deleteAccountPassword').value = '';
+}
+
+async function confirmDeleteAccount(){
+  const password = document.getElementById('deleteAccountPassword').value;
+  const button = document.getElementById('deleteAccountConfirmButton');
+  if(!password){ showToast('Digite sua senha atual para continuar.'); return; }
+  button.disabled = true;
+  button.textContent = 'Excluindo...';
+  try{
+    const api = await firebaseApi();
+    await api.deleteAccount(password);
+    closeDeleteAccountModal();
+    await completeLogoutFromSettings('Conta excluída.');
+  }catch(error){
+    button.disabled = false;
+    button.textContent = 'Excluir conta';
+    if((error?.code || '').includes('invalid-credential') || (error?.code || '').includes('wrong-password')){
+      showToast('A senha não confere. Nenhuma conta foi excluída.');
+    }else if((error?.code || '').includes('permission-denied')){
+      showToast('Publique a regra atualizada do Firebase e tente novamente.');
+    }else{
+      showToast('Não consegui concluir a exclusão. A conta ainda pode estar ativa; tente novamente.');
+    }
+  }
+}
+
+async function completeLogoutFromSettings(successMessage='Você saiu da conta.'){
   try{
     if(window.molbankFirebase) await window.molbankFirebase.signOut();
   } catch(error){
@@ -1220,7 +1264,7 @@ async function completeLogoutFromSettings(){
   const skipCheck = document.getElementById('skipRoomCheck');
   if(skipCheck) skipCheck.checked = false;
   setAuthMode('login');
-  showToast('Você saiu da conta');
+  showToast(successMessage);
   switchScreen('screen-login');
 }
 

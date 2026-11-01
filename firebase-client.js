@@ -1,6 +1,7 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   EmailAuthProvider,
   getAuth,
   onAuthStateChanged,
@@ -87,6 +88,62 @@ async function changeAccountPassword(currentPassword, newPassword) {
   if (String(newPassword || '').length < 6) throw new Error('WEAK_ACCOUNT_PASSWORD');
   await reauthenticateAccount(currentPassword);
   await updatePassword(requireUser(), newPassword);
+}
+
+async function deleteAccount(currentPassword) {
+  const user = requireUser();
+  const userRef = doc(db, 'users', user.uid);
+  const profileSnapshot = await getDoc(userRef);
+  if (!profileSnapshot.exists()) throw new Error('PROFILE_NOT_FOUND');
+  const profile = profileSnapshot.data();
+
+  await reauthenticateAccount(currentPassword);
+
+  if (profile.role === 'professor') {
+    const ownedRooms = await getDocs(query(collection(db, 'rooms'), where('teacherUid', '==', user.uid)));
+    for (const room of ownedRooms.docs) await deleteRoom(room.id);
+  } else if (profile.role === 'aluno') {
+    const roomCodes = [...new Set(profile.roomCodes || [])].filter(Boolean);
+    for (const roomCode of roomCodes) {
+      const memberRef = doc(db, 'rooms', roomCode, 'members', user.uid);
+      const memberSnapshot = await getDoc(memberRef);
+
+      if (memberSnapshot.exists()) {
+        const announcements = await getDocs(collection(db, 'rooms', roomCode, 'announcements'));
+        for (const announcement of announcements.docs) {
+          const ownComments = await getDocs(query(
+            collection(db, 'rooms', roomCode, 'announcements', announcement.id, 'comments'),
+            where('autorUid', '==', user.uid),
+          ));
+          await Promise.all(ownComments.docs.map((comment) => deleteDoc(comment.ref)));
+        }
+        await deleteDoc(memberRef);
+      }
+
+      const ownRequests = await getDocs(query(
+        collection(db, 'rooms', roomCode, 'storeRequests'),
+        where('memberUid', '==', user.uid),
+      ));
+      await Promise.all(ownRequests.docs.map((request) => deleteDoc(request.ref)));
+    }
+  } else {
+    throw new Error('PROFILE_NOT_FOUND');
+  }
+
+  const restorableProfile = {
+    uid: user.uid,
+    name: profile.name || user.displayName || 'Usuário',
+    email: user.email || profile.email || '',
+    role: profile.role,
+    createdAt: profile.createdAt || serverTimestamp(),
+  };
+  await deleteDoc(userRef);
+  try {
+    await deleteUser(user);
+  } catch (error) {
+    await setDoc(userRef, restorableProfile).catch(() => {});
+    throw error;
+  }
 }
 
 async function updateAccountName(name, role, roomCodes = []) {
@@ -353,6 +410,8 @@ async function deleteRoom(code) {
   if (room.data().teacherUid !== user.uid) throw new Error('ROOM_NOT_OWNED');
   const members = await getDocs(collection(db, 'rooms', code, 'members'));
   await Promise.all(members.docs.map((member) => deleteDoc(member.ref)));
+  const storeRequests = await getDocs(collection(db, 'rooms', code, 'storeRequests'));
+  await Promise.all(storeRequests.docs.map((request) => deleteDoc(request.ref)));
   const announcements = await getDocs(collection(db, 'rooms', code, 'announcements'));
   await Promise.all(announcements.docs.map(async (announcement) => {
     const comments = await getDocs(collection(db, 'rooms', code, 'announcements', announcement.id, 'comments'));
@@ -372,6 +431,7 @@ window.molbankFirebase = {
   sendPasswordReset,
   reauthenticateAccount,
   changeAccountPassword,
+  deleteAccount,
   updateAccountName,
   onAuthStateChanged: (callback) => onAuthStateChanged(auth, callback),
   getProfile: async (uid) => {
