@@ -94,6 +94,35 @@ function formatNotaComBonus(nota, bonus){
   return `${nota.toFixed(1)} <span style="color:var(--green); font-size:0.72em; font-weight:700;">(+${bonus.toFixed(1)})</span> = ${resultado}`;
 }
 
+function formatNotaPlain(nota){
+  return Number(nota).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1});
+}
+
+function formatActivityDate(ts){
+  const timestamp = typeof ts === 'number' ? ts : ts?.toMillis?.();
+  return timestamp ? new Date(timestamp).toLocaleDateString('pt-BR') : 'Data indisponível';
+}
+
+function formatMissionActivityLabel(label){
+  const match = String(label || '').match(/^Missão (solicitada|autorizada|recusada|concluída):\s*(.*)$/i);
+  if(!match) return String(label || '').replace(/<[^>]*>/g, '');
+  const [, status, details] = match;
+  const type = Object.values(MISSION_TYPES || {}).find(item=>details.startsWith(item.title))?.title;
+  const exam = details.match(/Prova\s+\d+/i)?.[0];
+  const statusLabel = {
+    solicitada:'Missão solicitada',
+    autorizada:'Missão autorizada',
+    recusada:'Missão recusada',
+    concluída:'Missão concluída',
+  }[status.toLowerCase()] || 'Missão';
+  const parts = [statusLabel, type, exam].filter(Boolean);
+  if(status.toLowerCase() === 'concluída'){
+    const improvement = details.match(/\+\s*([\d.,]+)\s+na nota/i)?.[1];
+    if(improvement) parts.push('+' + improvement.replace('.', ',') + ' na nota');
+  }
+  return parts.join(' · ');
+}
+
 function getLatestNota(s){
   return (s.notaHistory && s.notaHistory[0]) || null;
 }
@@ -239,7 +268,7 @@ function renderTeacherNotificationHistory(room){
   });
   room.students.forEach(student=>{
     (student.activity || []).filter(item=>/^Missão (autorizada|recusada|concluída):/.test(item.label || '')).forEach(item=>{
-      entries.push({time:item.ts || 0, title:item.label, detail:student.nome});
+      entries.push({time:item.ts || 0, title:formatMissionActivityLabel(item.label), detail:student.nome});
     });
   });
   getAvisos(room).forEach(aviso=>{
@@ -1441,7 +1470,8 @@ function renderHome(){
     catGrid.appendChild(card);
   });
 
-  document.getElementById('missionBadge').style.display = (me.notaHistory.length > 0 && notaEfetiva(me) < 6 && !me.mission) ? 'flex' : 'none';
+  const hasLowGrade = (me.notaHistory || []).some(entry=>Number(entry.nota) + (Number(entry.bonus) || 0) < 6);
+  document.getElementById('missionBadge').style.display = (hasLowGrade && !me.mission) ? 'flex' : 'none';
 
   const list = document.getElementById('activityList');
   list.innerHTML = '';
@@ -1451,7 +1481,9 @@ function renderHome(){
   me.activity.forEach(a=>{
     const row = document.createElement('div');
     row.className = 'activity-item';
-    row.innerHTML = `<div class="activity-ic ${a.pos?'pos':'neg'}">${a.icon}</div><div class="activity-text"><p>${a.label}</p><span>${timeAgo(a.ts)}</span></div><div class="activity-amount ${a.pos?'pos':'neg'}">${a.pos?'+':''}${a.amount}</div>`;
+    const isMissionActivity = /^Missão (solicitada|autorizada|recusada|concluída):/i.test(a.label || '');
+    const amount = Number(a.amount) || 0;
+    row.innerHTML = `<div class="activity-ic ${a.pos?'pos':'neg'}">${a.icon}</div><div class="activity-text"><p>${formatMissionActivityLabel(a.label)}</p><span>${isMissionActivity ? formatActivityDate(a.ts) : timeAgo(a.ts)}</span></div>${amount !== 0 || !isMissionActivity ? `<div class="activity-amount ${a.pos?'pos':'neg'}">${a.pos?'+':''}${a.amount}${isMissionActivity && amount !== 0 ? ' mol' : ''}</div>` : ''}`;
     list.appendChild(row);
   });
 }
@@ -1824,7 +1856,10 @@ function renderMissao(){
 
 function missionNoteLabel(student, noteId){
   const index = (student.notaHistory || []).findIndex(entry => String(entry.id) === String(noteId));
-  return index < 0 ? 'nota não encontrada' : provaLabel(student, index) + ' · ' + formatNotaComBonus(student.notaHistory[index].nota, student.notaHistory[index].bonus);
+  if(index < 0) return 'nota não encontrada';
+  const entry = student.notaHistory[index];
+  const current = Math.min(10, Number(entry.nota) + (Number(entry.bonus) || 0));
+  return provaLabel(student, index) + ' · Nota atual: ' + formatNotaPlain(current);
 }
 
 function openMissionNotePicker(type){
@@ -2989,8 +3024,10 @@ function authorizeMission(matricula){
   const room = rooms[state.teacherRoomCode];
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s || !s.mission || s.mission.status !== 'pendente') return;
+  const targetNoteIndex = (s.notaHistory || []).findIndex(entry=>String(entry.id) === String(s.mission.targetNoteId));
+  const exam = targetNoteIndex >= 0 ? ' · ' + provaLabel(s, targetNoteIndex) : '';
   s.mission.status = 'autorizada';
-  logActivity(s, 'Missão autorizada: ' + MISSION_TYPES[s.mission.type].title, 0, '🎯');
+  logActivity(s, 'Missão autorizada: ' + MISSION_TYPES[s.mission.type].title + exam, 0, '🎯');
   renderTeacher();
   showToast('Missão autorizada para ' + s.nome);
 }
@@ -3000,8 +3037,10 @@ function rejectMission(matricula){
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s || !s.mission) return;
   const missionTitle = MISSION_TYPES[s.mission.type].title;
+  const targetNoteIndex = (s.notaHistory || []).findIndex(entry=>String(entry.id) === String(s.mission.targetNoteId));
+  const exam = targetNoteIndex >= 0 ? ' · ' + provaLabel(s, targetNoteIndex) : '';
   s.mission = null;
-  logActivity(s, 'Missão recusada: ' + missionTitle, 0, '🚫');
+  logActivity(s, 'Missão recusada: ' + missionTitle + exam, 0, '🚫');
   renderTeacher();
   showToast('Missão recusada para ' + s.nome);
 }
@@ -3019,7 +3058,7 @@ function completeMission(matricula, bonusValue){
     targetNote.bonus = (targetNote.bonus||0) + bonusValue;
   }
   s.mission = null;
-  const bonusText = bonusValue > 0 ? (' · +' + bonusValue.toFixed(1) + ' na nota') : '';
+  const bonusText = bonusValue > 0 ? (' · +' + formatNotaPlain(bonusValue) + ' na nota') : '';
   logActivity(s, 'Missão concluída: ' + missionTitle + ' · ' + missionNoteLabel(s,targetNoteId) + bonusText, 2, '✅');
   renderTeacher();
   showToast('Missão concluída · +2 mol-edas' + bonusText + ' · ' + s.nome);
