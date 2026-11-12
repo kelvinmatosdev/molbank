@@ -252,6 +252,8 @@
     transition:all .25s ease; pointer-events:none; white-space:nowrap; z-index:80; max-width:90%; text-align:center;
   }
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.success{background:var(--green); color:#fff;}
+  .toast.error{background:var(--red); color:#fff;}
 
   /* ---------- Layout responsivo para tablets e computadores ---------- */
   @media (min-width: 700px){

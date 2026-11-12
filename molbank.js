@@ -1042,14 +1042,15 @@ function watchCloudStoreBonusRequests(code){
         const previous = previousById.get(request.id);
         if(request.memberUid !== state.uid || previous?.status !== 'pendente'
           || !['aplicado', 'rejeitado'].includes(request.status)) return;
+        const tone = request.status === 'aplicado' ? 'success' : 'error';
         if(request.requestType === 'bonus'){
           showToast(request.status === 'aplicado'
             ? `Aumento de +${Number(request.value).toFixed(1)} na nota aprovado.`
-            : 'Pedido de aumento recusado; mol-edas devolvidas.');
+            : 'Pedido de aumento recusado; mol-edas devolvidas.', 5000, tone);
         } else {
           showToast(request.status === 'aplicado'
             ? `Pedido de ${request.itemName} aprovado.`
-            : `Pedido de ${request.itemName} recusado; mol-edas devolvidas.`);
+            : `Pedido de ${request.itemName} recusado; mol-edas devolvidas.`, 5000, tone);
         }
       });
     }
@@ -3386,11 +3387,16 @@ enableSwipeToClose('avisoFormHandle', 'avisoFormSheet', closeAvisoForm);
 })();
 
 let toastTimer;
-function showToast(msg){
+function showToast(msg, duration=2400, tone=''){
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
+  t.textContent = msg;
+  t.classList.remove('success', 'error');
+  if(tone) t.classList.add(tone);
+  t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>t.classList.remove('show'), 2400);
+  toastTimer = setTimeout(()=>{
+    t.classList.remove('show', 'success', 'error');
+  }, duration);
 }
 
 setAuthMode('login');
