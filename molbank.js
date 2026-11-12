@@ -1405,10 +1405,16 @@ function goBackFromConfig(){
   if(state.role === 'professor'){ goTo('teacherPerfil'); } else { goTo('perfil'); }
 }
 
-let currentTheme = 'claro';
+function getSavedTheme(){
+  try{ return localStorage.getItem('molbank-theme') === 'escuro' ? 'escuro' : 'claro'; }
+  catch(error){ return 'claro'; }
+}
+
+let currentTheme = getSavedTheme();
 
 function toggleTheme(){
   currentTheme = currentTheme === 'claro' ? 'escuro' : 'claro';
+  try{ localStorage.setItem('molbank-theme', currentTheme); } catch(error){}
   applyTheme();
   showToast(currentTheme === 'escuro' ? 'Tema escuro ativado' : 'Tema claro ativado');
 }
@@ -3490,6 +3496,7 @@ function showToast(msg, duration=2400, tone=''){
   }, duration);
 }
 
+applyTheme();
 setAuthMode('register');
 
 window.addEventListener('molbank-firebase-ready', ()=>{
