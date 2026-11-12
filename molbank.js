@@ -63,6 +63,7 @@ const STORE_ITEMS = [
    ===================================================================== */
 let rooms = {}; // codigo -> {code, name, teacherName, students:[]}
 let teacherNotifHistoryVisible = false;
+let storeResolutionNoticeTimer = null;
 // (turmas de cada professor agora são calculadas por nome via getMyTeacherRooms())
 
 function makeStudent(nome, matricula){
@@ -1042,15 +1043,25 @@ function watchCloudStoreBonusRequests(code){
         const previous = previousById.get(request.id);
         if(request.memberUid !== state.uid || previous?.status !== 'pendente'
           || !['aplicado', 'rejeitado'].includes(request.status)) return;
-        const tone = request.status === 'aplicado' ? 'success' : 'error';
-        if(request.requestType === 'bonus'){
-          showToast(request.status === 'aplicado'
-            ? `Aumento de +${Number(request.value).toFixed(1)} na nota aprovado.`
-            : 'Pedido de aumento recusado; mol-edas devolvidas.', 5000, tone);
-        } else {
-          showToast(request.status === 'aplicado'
-            ? `Pedido de ${request.itemName} aprovado.`
-            : `Pedido de ${request.itemName} recusado; mol-edas devolvidas.`, 5000, tone);
+        const approved = request.status === 'aplicado';
+        const student = room.students.find(item=>item.uid === state.uid);
+        if(student){
+          student.storeResolutionNotice = {
+            tone:approved ? 'success' : 'error',
+            text:request.requestType === 'bonus'
+              ? (approved
+                ? `Aumento de +${Number(request.value).toFixed(1)} na nota aprovado.`
+                : 'Pedido de aumento recusado; mol-edas devolvidas.')
+              : (approved
+                ? `Pedido de ${request.itemName} aprovado.`
+                : `Pedido de ${request.itemName} recusado; mol-edas devolvidas.`),
+          };
+          clearTimeout(storeResolutionNoticeTimer);
+          storeResolutionNoticeTimer = setTimeout(()=>{
+            student.storeResolutionNotice = null;
+            if(state.role === 'aluno' && state.roomCode === code
+              && document.querySelector('.screen.active')?.id === 'screen-loja') renderStore();
+          }, 5000);
         }
       });
     }
@@ -1598,6 +1609,13 @@ function renderStore(){
     notice.textContent = `Pedido de ${request.itemName} aguardando aprovação. ${request.cost} mol-edas estão reservadas.`;
     content.appendChild(notice);
   });
+  if(me.storeResolutionNotice){
+    const notice = document.createElement('p');
+    const approved = me.storeResolutionNotice.tone === 'success';
+    notice.style.cssText = `font-size:11.5px; background:${approved?'rgba(63,182,95,.12)':'rgba(220,70,70,.12)'}; color:${approved?'var(--green)':'var(--red)'}; padding:10px 12px; border-radius:12px; margin-bottom:8px; font-weight:600; line-height:1.5;`;
+    notice.textContent = me.storeResolutionNotice.text;
+    content.appendChild(notice);
+  }
   if(me.storeBonusActive){
     const entryIdx = (me.notaHistory||[]).findIndex(h=>h.id === me.storeBonusActive.entryId);
     const entry = entryIdx > -1 ? me.notaHistory[entryIdx] : null;
