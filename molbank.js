@@ -1835,7 +1835,7 @@ function openMissionNotePicker(type){
   document.getElementById('notaPickerTitle').textContent = 'Qual nota você quer melhorar?';
   const list = document.getElementById('notaPickerList');
   list.innerHTML = eligible.map(({entry,index})=>`
-    <button onclick="chooseMissionNote('${type}', ${JSON.stringify(String(entry.id))})" style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left; background:var(--gray-light); color:var(--text-primary); border:none; padding:13px 14px; border-radius:14px; font-family:inherit; margin-bottom:8px; cursor:pointer;">
+    <button onclick="chooseMissionNote('${type}', '${String(entry.id)}')" style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left; background:var(--gray-light); color:var(--text-primary); border:none; padding:13px 14px; border-radius:14px; font-family:inherit; margin-bottom:8px; cursor:pointer;">
       <span style="font-size:13px; font-weight:600;">${provaLabel(me,index)}<span style="display:block; font-size:10.5px; color:var(--gray); font-weight:500;">${entry.date}</span></span>
       <span style="font-family:'Space Grotesk', sans-serif; font-weight:700; color:var(--orange);">${formatNotaComBonus(entry.nota,entry.bonus)}</span>
     </button>`).join('');
