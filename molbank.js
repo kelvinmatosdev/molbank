@@ -1035,6 +1035,24 @@ function watchCloudStoreBonusRequests(code){
     const requestTime = request=>typeof request.createdAt === 'number'
       ? request.createdAt
       : request.createdAt?.toMillis?.() || 0;
+    const previousRequests = room.storeRequests || [];
+    if(state.role === 'aluno' && state.roomCode === code){
+      const previousById = new Map(previousRequests.map(request=>[request.id, request]));
+      requests.forEach(request=>{
+        const previous = previousById.get(request.id);
+        if(request.memberUid !== state.uid || previous?.status !== 'pendente'
+          || !['aplicado', 'rejeitado'].includes(request.status)) return;
+        if(request.requestType === 'bonus'){
+          showToast(request.status === 'aplicado'
+            ? `Aumento de +${Number(request.value).toFixed(1)} na nota aprovado.`
+            : 'Pedido de aumento recusado; mol-edas devolvidas.');
+        } else {
+          showToast(request.status === 'aplicado'
+            ? `Pedido de ${request.itemName} aprovado.`
+            : `Pedido de ${request.itemName} recusado; mol-edas devolvidas.`);
+        }
+      });
+    }
     room.storeRequests = requests;
     room.teacherAlerts = requests
       .filter(request=>request.requestType === 'purchase' && request.status === 'aplicado')
@@ -1051,9 +1069,6 @@ function watchCloudStoreBonusRequests(code){
     room.students.forEach(student=>{
       student.storePendingPurchases = requests.filter(request=>request.memberUid === student.uid
         && request.requestType === 'purchase' && request.status === 'pendente');
-      student.storeRecentPurchases = requests.filter(request=>request.memberUid === student.uid
-        && request.requestType === 'purchase' && ['aplicado', 'rejeitado'].includes(request.status))
-        .sort((a,b)=>requestTime(b)-requestTime(a)).slice(0, 3);
       const request = latestByStudent.get(student.uid);
       if(!request || request.status === 'rejeitado'
         || (request.status === 'aplicado' && student.notaHistory?.[0]?.id !== request.latestNoteId)){
@@ -1576,15 +1591,6 @@ function renderStore(){
   approvalHint.style.cssText = 'font-size:11.5px; color:var(--gray); margin:0 0 12px; line-height:1.5;';
   approvalHint.textContent = 'Todos os resgates precisam da aprovação do professor. O valor fica reservado até a decisão.';
   content.appendChild(approvalHint);
-  (me.storeRecentPurchases || []).forEach(request=>{
-    const notice = document.createElement('p');
-    const rejected = request.status === 'rejeitado';
-    notice.style.cssText = `font-size:11.5px; background:${rejected?'rgba(220,70,70,.1)':'rgba(63,182,95,.1)'}; color:${rejected?'var(--red)':'var(--green)'}; padding:10px 12px; border-radius:12px; margin-bottom:8px; font-weight:600; line-height:1.5;`;
-    notice.textContent = rejected
-      ? `O professor recusou ${request.itemName}; ${request.cost} mol-edas foram devolvidas.`
-      : `O professor aprovou ${request.itemName}.`;
-    content.appendChild(notice);
-  });
   (me.storePendingPurchases || []).filter(request=>request.status === 'pendente').forEach(request=>{
     const notice = document.createElement('p');
     notice.style.cssText = 'font-size:11.5px; background:rgba(59,125,240,.1); color:var(--blue); padding:10px 12px; border-radius:12px; margin-bottom:8px; font-weight:600; line-height:1.5;';
@@ -1596,12 +1602,11 @@ function renderStore(){
     const entry = entryIdx > -1 ? me.notaHistory[entryIdx] : null;
     const label = entry ? provaLabel(me, entryIdx) : '';
     const notice = document.createElement('p');
-    const isPending = me.storeBonusActive.status === 'pendente';
-    notice.style.cssText = `font-size:11.5px; background:${isPending?'rgba(59,125,240,.1)':'rgba(63,182,95,.1)'}; color:${isPending?'var(--blue)':'var(--green)'}; padding:10px 12px; border-radius:12px; margin-bottom:14px; font-weight:600; line-height:1.5;`;
-    notice.textContent = isPending
-      ? `Pedido de +${me.storeBonusActive.value.toFixed(1)} na ${label} aguardando aprovação. ${me.storeBonusActive.cost} mol-edas estão reservadas.`
-      : `+${me.storeBonusActive.value.toFixed(1)} aplicado na ${label}. Só dá pra pedir outro depois que o professor lançar a próxima nota.`;
-    content.appendChild(notice);
+    if(me.storeBonusActive.status === 'pendente'){
+      notice.style.cssText = 'font-size:11.5px; background:rgba(59,125,240,.1); color:var(--blue); padding:10px 12px; border-radius:12px; margin-bottom:14px; font-weight:600; line-height:1.5;';
+      notice.textContent = `Pedido de +${me.storeBonusActive.value.toFixed(1)} na ${label} aguardando aprovação. ${me.storeBonusActive.cost} mol-edas estão reservadas.`;
+      content.appendChild(notice);
+    }
   } else if(!me.notaHistory || me.notaHistory.length === 0){
     const notice = document.createElement('p');
     notice.style.cssText = 'font-size:11.5px; color:var(--gray); margin-bottom:14px;';
