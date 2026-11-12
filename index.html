@@ -62,16 +62,16 @@
       <div class="field">
         <label>Código da sala</label>
         <input type="text" id="loginRoomCode" placeholder="Ex: XXXXXX" style="text-transform:uppercase;" oninput="clearFieldError('loginRoomCode')">
-        <div class="field-error" id="loginRoomCodeError">Digita o código da sala, ou marca a opção abaixo.</div>
+        <div class="field-error" id="loginRoomCodeError">Digite o código da turma ou escolha entrar sem turma por enquanto.</div>
       </div>
       <label class="skip-check">
         <input type="checkbox" id="skipRoomCheck" onchange="toggleSkipRoom()">
-        <span>Entrar sem uma turma por enquanto</span>
+        <span>Não tenho o código; entrar sem turma por enquanto</span>
       </label>
     </div>
 
     <button class="btn btn-primary" id="loginSubmitButton" onclick="submitAuth()">Criar conta</button>
-    <p class="switch-mode" id="authModeSwitch">Ainda não tem conta? <b onclick="setAuthMode('register')">Criar conta</b></p>
+    <p class="switch-mode" id="authModeSwitch">Já tem uma conta? <b onclick="setAuthMode('login')">Entrar</b></p>
     <p class="switch-mode" id="forgotPasswordSwitch"><b onclick="resetPassword()">Esqueci minha senha</b></p>
   </div>
   </div>

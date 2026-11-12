@@ -906,12 +906,13 @@ function pickRole(role){
   state.role = role;
   document.querySelectorAll('#rolePick button').forEach(b=>b.classList.remove('selected'));
   document.querySelector(`#rolePick button[data-role="${role}"]`).classList.add('selected');
-  document.getElementById('alunoJoinArea').style.display = role === 'professor' ? 'none' : 'block';
+  document.getElementById('alunoJoinArea').style.display = role === 'professor' || authMode === 'login' ? 'none' : 'block';
 }
 
 function toggleSkipRoom(){
   const skip = document.getElementById('skipRoomCheck').checked;
   const codeInput = document.getElementById('loginRoomCode');
+  if(skip) codeInput.value = '';
   codeInput.disabled = skip;
   codeInput.style.opacity = skip ? '.4' : '1';
   clearFieldError('loginRoomCode');
@@ -931,6 +932,7 @@ function setAuthMode(mode){
   const isRegister = authMode === 'register';
   document.getElementById('loginNameField').style.display = isRegister ? 'block' : 'none';
   document.getElementById('rolePick').style.display = isRegister ? 'flex' : 'none';
+  document.getElementById('alunoJoinArea').style.display = isRegister && state.role === 'aluno' ? 'block' : 'none';
   document.getElementById('loginSubmitButton').textContent = isRegister ? 'Criar conta' : 'Entrar no Molbank';
   document.getElementById('authModeSwitch').innerHTML = isRegister
     ? 'Já tem uma conta? <b onclick="setAuthMode(\'login\')">Entrar</b>'
@@ -941,6 +943,7 @@ function setAuthMode(mode){
   clearFieldError('loginName');
   clearFieldError('loginEmail');
   clearFieldError('loginPassword');
+  clearFieldError('loginRoomCode');
 }
 
 function togglePasswordVisibility(){
@@ -1304,13 +1307,21 @@ async function registerAccount(){
   const name = document.getElementById('loginName').value.trim();
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
+  const roomCodeInput = document.getElementById('loginRoomCode');
+  const skipRoom = document.getElementById('skipRoomCheck').checked;
+  const roomCode = roomCodeInput.value.trim().toUpperCase();
   const nameValid = name.length >= 2;
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const passwordValid = password.length >= 6;
+  const roomChoiceValid = state.role !== 'aluno' || Boolean(roomCode) !== skipRoom;
   setFieldError('loginName', !nameValid);
   setFieldError('loginEmail', !emailValid);
   setFieldError('loginPassword', !passwordValid);
-  if(!nameValid || !emailValid || !passwordValid) return;
+  setFieldError('loginRoomCode', !roomChoiceValid);
+  if(!nameValid || !emailValid || !passwordValid || !roomChoiceValid){
+    if(!roomChoiceValid) setAuthMessage('Digite o código da turma ou marque a opção para entrar sem turma.');
+    return;
+  }
 
   authBusy = true;
   const button = document.getElementById('loginSubmitButton');
@@ -1320,7 +1331,7 @@ async function registerAccount(){
     const api = await firebaseApi();
     const user = await api.createAccount({ name, email, password, role: state.role });
     const profile = await api.getProfile(user.uid);
-    const code = state.role === 'aluno' ? document.getElementById('loginRoomCode').value : '';
+    const code = state.role === 'aluno' && !skipRoom ? roomCode : '';
     await finishFirebaseLogin(user, profile, code);
   } catch(error){
     setAuthMessage(firebaseErrorMessage(error));
@@ -1483,7 +1494,8 @@ async function completeLogoutFromSettings(successMessage='Você saiu da conta.')
   document.getElementById('loginRoomCode').value = '';
   const skipCheck = document.getElementById('skipRoomCheck');
   if(skipCheck) skipCheck.checked = false;
-  setAuthMode('login');
+  toggleSkipRoom();
+  setAuthMode('register');
   showToast(successMessage);
   switchScreen('screen-login');
 }
@@ -3478,7 +3490,7 @@ function showToast(msg, duration=2400, tone=''){
   }, duration);
 }
 
-setAuthMode('login');
+setAuthMode('register');
 
 window.addEventListener('molbank-firebase-ready', ()=>{
   const api = window.molbankFirebase;
