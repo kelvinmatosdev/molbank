@@ -225,6 +225,18 @@ async function updateRoomTeacherAlertsSeen(code, seenAt) {
   await updateDoc(doc(db, 'rooms', code), { teacherAlertsSeenAt: seenAt });
 }
 
+async function updateRoomTeacherNotifRead(code, readState, seenAt = null) {
+  requireUser();
+  const update = { teacherNotifRead: readState };
+  if (Number.isFinite(seenAt)) update.teacherAlertsSeenAt = seenAt;
+  await updateDoc(doc(db, 'rooms', code), update);
+}
+
+async function clearRoomTeacherNotifHistory(code, clearedAt) {
+  requireUser();
+  await updateDoc(doc(db, 'rooms', code), { teacherNotifHistoryClearedAt: clearedAt });
+}
+
 async function getRoomAnnouncements(code) {
   const snapshot = await getDocs(collection(db, 'rooms', code, 'announcements'));
   return snapshot.docs.map((announcement) => ({ ...announcement.data(), id: Number(announcement.id) || announcement.id, comments: [] }));
@@ -456,6 +468,8 @@ window.molbankFirebase = {
   updateMemberProgress,
   updateMemberAvisosSeen,
   updateRoomTeacherAlertsSeen,
+  updateRoomTeacherNotifRead,
+  clearRoomTeacherNotifHistory,
   getRoomAnnouncements,
   saveRoomAnnouncement,
   deleteRoomAnnouncement,

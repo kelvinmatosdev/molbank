@@ -209,34 +209,85 @@ function showAvisoSyncError(){
   showToast('Não consegui salvar o aviso no Firebase. Confira a conexão e as regras.');
 }
 
-function getUnreadForTeacher(aviso){
-  return aviso.comments.filter(c=>c.autorRole==='aluno' && c.ts > (aviso.teacherLastSeen||0)).length;
+function getUnreadForTeacher(aviso, room){
+  const readAt = Math.max(aviso.teacherLastSeen || 0, Number(room?.teacherNotifRead?.[`comments_${aviso.id}`]) || 0);
+  return aviso.comments.filter(c=>c.autorRole==='aluno' && c.ts > readAt).length;
+}
+function isTeacherPurchaseUnread(room, alert){
+  return !room.teacherNotifRead?.[`purchase_${alert.id}`]
+    && alert.time > (room.teacherAlertsSeenAt || 0);
 }
 function getTotalUnreadForTeacher(room){
-  return getAvisos(room).reduce((sum,a)=>sum + getUnreadForTeacher(a), 0);
+  return getAvisos(room).reduce((sum,a)=>sum + getUnreadForTeacher(a, room), 0);
+}
+
+async function markTeacherNotificationRead(kind, id){
+  const room = rooms[state.teacherRoomCode];
+  if(!room) return;
+  const previousState = room.teacherNotifRead || {};
+  const readState = {...(room.teacherNotifRead || {})};
+  readState[`${kind}_${id}`] = Date.now();
+  room.teacherNotifRead = readState;
+  renderTeacher();
+  try{
+    if(room.isCloud) await (await firebaseApi()).updateRoomTeacherNotifRead(room.code, readState);
+    showToast('Notificação marcada como lida.');
+  }catch(error){
+    room.teacherNotifRead = previousState;
+    renderTeacher();
+    showToast('Não consegui salvar a leitura. Confira a conexão e tente novamente.');
+  }
 }
 
 async function markTeacherNotificationsRead(){
   const room = rooms[state.teacherRoomCode];
   if(!room) return;
   const seenAt = Date.now();
+  const previousSeenAt = room.teacherAlertsSeenAt || 0;
+  const previousReadState = room.teacherNotifRead || {};
+  const previousAvisoSeenAt = new Map(getAvisos(room).map(aviso=>[aviso.id, aviso.teacherLastSeen || 0]));
+  const readState = {...(room.teacherNotifRead || {})};
   room.teacherAlertsSeenAt = seenAt;
+  getAvisos(room).forEach(aviso=>{
+    if(getUnreadForTeacher(aviso, room) > 0) readState[`comments_${aviso.id}`] = seenAt;
+  });
+  room.teacherNotifRead = readState;
   const saves = [];
   if(room.isCloud){
-    saves.push(firebaseApi().then(api=>api.updateRoomTeacherAlertsSeen(room.code, seenAt)));
+    saves.push(firebaseApi().then(api=>api.updateRoomTeacherNotifRead(room.code, readState, seenAt)));
   }
-  getAvisos(room).forEach(aviso=>{
-    if(getUnreadForTeacher(aviso) <= 0) return;
-    aviso.teacherLastSeen = seenAt;
-    if(room.isCloud) saves.push(saveCloudAviso(room, aviso));
-  });
   renderTeacher();
   try{
+    getAvisos(room).forEach(aviso=>{
+      if(Number(readState[`comments_${aviso.id}`]) !== seenAt) return;
+      aviso.teacherLastSeen = seenAt;
+      if(room.isCloud) saves.push(saveCloudAviso(room, aviso));
+    });
     await Promise.all(saves);
-    showToast('Notificações informativas marcadas como lidas.');
+    showToast('Todas as notificações informativas foram marcadas como lidas.');
   }catch(error){
+    room.teacherAlertsSeenAt = previousSeenAt;
+    room.teacherNotifRead = previousReadState;
+    getAvisos(room).forEach(aviso=>{ aviso.teacherLastSeen = previousAvisoSeenAt.get(aviso.id) || 0; });
+    renderTeacher();
     showToast('Não consegui salvar a leitura. Confira a conexão e tente novamente.');
   }
+}
+
+function clearTeacherNotificationHistory(){
+  const room = rooms[state.teacherRoomCode];
+  if(!room) return;
+  showGenericConfirm('Limpar histórico?', 'Isso vai limpar a lista do histórico de notificações desta turma. Essa ação não pode ser desfeita.', async ()=>{
+    const clearedAt = Date.now();
+    try{
+      if(room.isCloud) await (await firebaseApi()).clearRoomTeacherNotifHistory(room.code, clearedAt);
+      room.teacherNotifHistoryClearedAt = clearedAt;
+      renderTeacherNotificationHistory(room);
+      showToast('Histórico de notificações limpo.');
+    }catch(error){
+      showToast('Não consegui limpar o histórico. Confira a conexão e tente novamente.');
+    }
+  });
 }
 
 function toggleTeacherNotifHistory(){
@@ -265,7 +316,7 @@ function renderTeacherNotificationHistory(room){
     const title = request.requestType === 'bonus'
       ? `Aumento de +${Number(request.value).toFixed(1)} ${approved ? 'aprovado' : 'recusado'}`
       : `${request.itemName} ${approved ? 'aprovado' : 'recusado'}`;
-    entries.push({time:request.decidedAt || requestTime(request), title, detail:`${request.studentName} · ${request.cost} mol-edas${approved ? '' : ' devolvidas'}`});
+      entries.push({time:request.decidedAt || requestTime(request), title, detail:`${request.studentName} · ${request.cost} mol-edas${approved ? '' : ' devolvidas'}`});
   });
   room.students.forEach(student=>{
     (student.activity || []).filter(item=>/^Missão (autorizada|recusada|concluída):/.test(item.label || '')).forEach(item=>{
@@ -277,20 +328,31 @@ function renderTeacherNotificationHistory(room){
       entries.push({time:comment.ts || 0, title:`Comentário em “${aviso.titulo}”`, detail:`${comment.autorNome}: ${comment.texto}`});
     });
   });
-  entries.sort((a,b)=>b.time-a.time);
+  const clearedAt = Number(room.teacherNotifHistoryClearedAt) || 0;
+  const visibleEntries = entries.filter(entry=>entry.time > clearedAt).sort((a,b)=>b.time-a.time);
   container.innerHTML = '';
+  const titleRow = document.createElement('div');
+  titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;';
   const heading = document.createElement('h3');
   heading.className = 'teacher-notif-history-title';
   heading.textContent = 'Histórico de notificações';
-  container.appendChild(heading);
-  if(!entries.length){
+  titleRow.appendChild(heading);
+  if(visibleEntries.length){
+    const clearButton = document.createElement('button');
+    clearButton.className = 'teacher-notif-clear-btn';
+    clearButton.textContent = 'Limpar histórico';
+    clearButton.onclick = clearTeacherNotificationHistory;
+    titleRow.appendChild(clearButton);
+  }
+  container.appendChild(titleRow);
+  if(!visibleEntries.length){
     const empty = document.createElement('p');
     empty.style.cssText = 'font-size:12px;color:var(--gray);text-align:center;padding:24px 8px;';
     empty.textContent = 'Ainda não há notificações no histórico.';
     container.appendChild(empty);
     return;
   }
-  entries.forEach(entry=>{
+  visibleEntries.forEach(entry=>{
     const card = document.createElement('div');
     card.className = 'teacher-notif-history-card';
     const title = document.createElement('strong');
@@ -392,7 +454,7 @@ function renderAvisosLista(){
   content.innerHTML = avisos.map(a=>{
     let badge = '';
     if(state.role === 'professor'){
-      const unread = getUnreadForTeacher(a);
+      const unread = getUnreadForTeacher(a, room);
       if(unread > 0) badge = `<span style="background:var(--red); color:#fff; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:9px; margin-left:6px;">${unread} novo(s)</span>`;
     } else if(me){
       if(isAvisoUnseenByStudent(a, me)){
@@ -1065,12 +1127,12 @@ function watchCloudStoreBonusRequests(code){
         }
       });
     }
-    room.storeRequests = requests;
+  room.storeRequests = requests;
     room.teacherAlerts = requests
       .filter(request=>request.requestType === 'purchase' && request.status === 'aplicado')
       .sort((a,b)=>requestTime(b)-requestTime(a))
       .map(request=>({
-        type:'compra', matricula:request.memberUid, nome:request.studentName,
+        id:request.id, type:'compra', matricula:request.memberUid, nome:request.studentName,
         detail:request.itemName, cost:request.cost, time:requestTime(request),
       }));
     const pendingBonusByStudent = new Map();
@@ -2544,7 +2606,7 @@ function renderTeacher(){
   renderMissionOrderList('teacherMissionOrderResumo', room);
   const pendingStoreRequests = (room.storeRequests || []).filter(request=>request.status === 'pendente');
   const bonusRequests = room.students.filter(s=>s.storeBonusActive && s.storeBonusActive.status==='pendente');
-  const unreadPurchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && a.time > (room.teacherAlertsSeenAt || 0));
+  const unreadPurchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && isTeacherPurchaseUnread(room,a));
   const unreadInformationalCount = unreadPurchaseAlerts.length + getTotalUnreadForTeacher(room);
   const notifCount = queue.length + authorized.length + pendingStoreRequests.length + unreadInformationalCount;
   const badge = document.getElementById('teacherNotifBadge');
@@ -2555,7 +2617,7 @@ function renderTeacher(){
   if(unreadInformationalCount){
     const readButton = document.createElement('button');
     readButton.className = 'teacher-notif-read-btn';
-    readButton.textContent = 'Marcar notificações informativas como lidas';
+    readButton.textContent = 'Marcar tudo como lido';
     readButton.onclick = markTeacherNotificationsRead;
     alerts.appendChild(readButton);
   }
@@ -2607,20 +2669,20 @@ function renderTeacher(){
     });
   }
 
-  const purchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && a.time > (room.teacherAlertsSeenAt || 0)).slice(0,6);  purchaseAlerts.forEach(a=>{
+  const purchaseAlerts = room.teacherAlerts.filter(a=>a.type==='compra' && isTeacherPurchaseUnread(room,a)).slice(0,6);  purchaseAlerts.forEach(a=>{
     const div = document.createElement('div');
     div.className = 'teacher-mission-alert';
     div.style.borderColor = 'rgba(46,196,182,.3)'; div.style.background = 'rgba(46,196,182,.07)';
-    div.innerHTML = `<p>🛍️ ${a.nome} resgatou "${a.detail}" (${a.cost} mol)</p>`;
+    div.innerHTML = `<p>🛍️ ${a.nome} resgatou "${a.detail}" (${a.cost} mol)</p><button class="teacher-notif-item-read-btn" onclick="markTeacherNotificationRead('purchase','${a.id}')">Marcar como lida</button>`;
     alerts.appendChild(div);
   });
 
-  const avisosComNovo = getAvisos(room).filter(a => getUnreadForTeacher(a) > 0);
+  const avisosComNovo = getAvisos(room).filter(a => getUnreadForTeacher(a, room) > 0);
   avisosComNovo.forEach(a=>{
     const div = document.createElement('div');
     div.className = 'teacher-mission-alert';
     div.style.borderColor = 'rgba(59,125,240,.3)'; div.style.background = 'rgba(59,125,240,.08)';
-    div.innerHTML = `<p>💬 ${getUnreadForTeacher(a)} comentário(s) novo(s) em "${a.titulo}"</p><button style="background:var(--blue);" onclick="closeRewardsManager(); openAvisoDetail(${a.id});">Ver</button>`;
+    div.innerHTML = `<p>💬 ${getUnreadForTeacher(a, room)} comentário(s) novo(s) em "${a.titulo}"</p><button style="background:var(--blue);" onclick="closeRewardsManager(); openAvisoDetail(${a.id});">Ver</button><button class="teacher-notif-item-read-btn" onclick="markTeacherNotificationRead('comments','${a.id}')">Marcar como lida</button>`;
     alerts.appendChild(div);
   });
 
