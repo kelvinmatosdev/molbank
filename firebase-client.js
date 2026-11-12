@@ -402,6 +402,7 @@ async function joinRoom(code, name) {
       notaHistory: [],
       categorias: { participacao: 0, atividades: 0, comportamento: 0, fardamento: 0, frequencia: 0 },
       attendanceHistory: [],
+      missionEligibleNoteIds: [],
       freqMarkedToday: null,
       freqMarkedDate: null,
       activity: [],

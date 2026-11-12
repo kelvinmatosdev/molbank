@@ -52,9 +52,10 @@ service cloud.firestore {
       function validMission(mission) {
         return mission == null
           || (mission is map
-            && mission.keys().hasOnly(['type', 'presentationDate', 'status', 'requestedAt'])
+            && mission.keys().hasOnly(['type', 'presentationDate', 'targetNoteId', 'status', 'requestedAt'])
             && mission.type in ['questoes', 'apresentacao']
             && mission.presentationDate is string
+            && (!mission.keys().hasAny(['targetNoteId']) || mission.targetNoteId is number)
             && mission.status in ['pendente', 'autorizada']
             && mission.requestedAt is number);
       }
@@ -85,14 +86,14 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly([
             'uid', 'nome', 'matricula', 'coins', 'nota', 'notaHistory',
             'categorias', 'activity', 'avisosSeen', 'attendanceHistory',
-            'freqMarkedToday', 'freqMarkedDate', 'joinedAt'
+            'freqMarkedToday', 'freqMarkedDate', 'missionEligibleNoteIds', 'joinedAt'
           ])
           && exists(/databases/$(database)/documents/rooms/$(roomCode));
 
         allow update: if (ownsRoom(roomCode)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'coins', 'nota', 'notaHistory', 'categorias', 'activity',
-            'freqMarkedToday', 'freqMarkedDate', 'attendanceHistory', 'mission', 'updatedAt'
+            'freqMarkedToday', 'freqMarkedDate', 'attendanceHistory', 'mission', 'missionEligibleNoteIds', 'updatedAt'
           ])
           && request.resource.data.coins is number
           && request.resource.data.coins >= 0
@@ -108,6 +109,8 @@ service cloud.firestore {
           && request.resource.data.activity.size() <= 25
           && request.resource.data.attendanceHistory is list
           && request.resource.data.attendanceHistory.size() <= 400
+          && request.resource.data.missionEligibleNoteIds is list
+          && request.resource.data.missionEligibleNoteIds.size() <= 400
           && validMission(request.resource.data.mission)
           && request.resource.data.freqMarkedToday in [null, 'presente', 'falta']
           && (request.resource.data.freqMarkedDate == null || request.resource.data.freqMarkedDate is string))
@@ -174,14 +177,15 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mission', 'activity'])
             && (!resource.data.keys().hasAny(['mission']) || resource.data.mission == null)
             && request.resource.data.mission is map
-            && request.resource.data.mission.keys().hasOnly(['type', 'presentationDate', 'status', 'requestedAt'])
+            && request.resource.data.mission.keys().hasOnly(['type', 'presentationDate', 'targetNoteId', 'status', 'requestedAt'])
             && request.resource.data.mission.type in ['questoes', 'apresentacao']
             && request.resource.data.mission.presentationDate is string
             && request.resource.data.mission.status == 'pendente'
             && request.resource.data.mission.requestedAt is number
             && resource.data.notaHistory is list
             && resource.data.notaHistory.size() > 0
-            && resource.data.notaHistory[0].nota + resource.data.notaHistory[0].get('bonus', 0) < 6
+            && request.resource.data.mission.targetNoteId is number
+            && request.resource.data.mission.targetNoteId in resource.data.missionEligibleNoteIds
             && request.resource.data.activity is list
             && request.resource.data.activity.size() > 0
             && request.resource.data.activity.size() <= 25

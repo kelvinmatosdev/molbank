@@ -119,6 +119,9 @@ function persistTeacherProgress(student, roomCode = state.teacherRoomCode){
     categorias: student.categorias || {},
     activity: Array.isArray(student.activity) ? student.activity.slice(0, 25) : [],
     mission: student.mission || null,
+    missionEligibleNoteIds: (Array.isArray(student.notaHistory) ? student.notaHistory : [])
+      .filter(entry => Number(entry.nota) + (Number(entry.bonus) || 0) < 6)
+      .map(entry => Number(entry.id)).filter(Number.isFinite).slice(0, 400),
     attendanceHistory: Array.isArray(student.attendanceHistory) ? student.attendanceHistory.slice(0, 400) : [],
     freqMarkedToday: student.freqMarkedToday || null,
     freqMarkedDate: student.freqMarkedDate || null,
@@ -1084,6 +1087,10 @@ function watchCloudRoomProgress(code){
       student.uid = uid;
       student.matricula = data.matricula || uid;
       student.isMe = uid === state.uid;
+      if(state.role === 'professor' && state.uid && room.teacherUid === state.uid
+        && !Array.isArray(data.missionEligibleNoteIds)){
+        persistTeacherProgress(student, code);
+      }
       return student;
     });
     refreshProgressView(code);
@@ -1755,7 +1762,7 @@ function renderMissionOrderList(containerId, room){
       return `<div class="rank-row" style="background:var(--gray-light);">
         <div class="rank-pos">${i+1}º</div>
         <div class="rank-avatar">${s.nome[0].toUpperCase()}</div>
-        <div class="rank-name">${s.nome}<span style="display:block; font-size:10.5px; color:var(--gray); font-weight:500;">${MISSION_TYPES[s.mission.type].title}</span></div>
+        <div class="rank-name">${s.nome}<span style="display:block; font-size:10.5px; color:var(--gray); font-weight:500;">${MISSION_TYPES[s.mission.type].title} · ${missionNoteLabel(s,s.mission.targetNoteId)}</span></div>
         <div style="font-size:11px; font-weight:700; color:${statusColor};">${statusLabel}</div>
       </div>`;
     }).join('');
@@ -1773,10 +1780,11 @@ function renderMissao(){
   }
   const room = rooms[state.roomCode];
 
+  const eligibleNotes = (me.notaHistory || []).filter(entry => Number(entry.nota) + (Number(entry.bonus) || 0) < 6);
   if(me.notaHistory.length === 0){
     content.innerHTML = `<div class="mission-lock"><div class="ic">🔒</div><p>Missão ainda não disponível.<br>Assim que o professor lançar sua primeira nota, essa área libera automaticamente.</p></div>`;
-  } else if(notaEfetiva(me) >= 6 && !me.mission){
-    content.innerHTML = `<div class="mission-lock"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><rect x="4" y="11" width="16" height="9" rx="1"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><p>Missão disponível só pra quem está com nota abaixo de 6,0.<br>Sua nota atual é <b>${notaEfetiva(me).toFixed(1)}</b> — continue assim!</p></div>`;
+  } else if(eligibleNotes.length === 0 && !me.mission){
+    content.innerHTML = `<div class="mission-lock"><div class="ic"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; flex-shrink:0;"><rect x="4" y="11" width="16" height="9" rx="1"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><p>As missões ficam disponíveis quando você tem alguma nota abaixo de 6,0.<br>Por enquanto, todas as suas notas estão em 6,0 ou mais.</p></div>`;
   } else if(me.mission){
     const m = me.mission;
     const typeInfo = MISSION_TYPES[m.type];
@@ -1792,14 +1800,15 @@ function renderMissao(){
       <span class="mission-status ${statusClass}">${statusLabel}</span>
       <h3>${typeInfo.title}</h3>
       <p>${typeInfo.desc}</p>
+      <p>Nota escolhida: <b>${missionNoteLabel(me, m.targetNoteId)}</b></p>
       <div class="mission-reward">Recompensa: +2 mol-edas ao concluir · máx. 5 min de apresentação</div>
       ${posInfo}
     </div>`;
   } else {
     content.innerHTML = `
-      <p style="font-size:12.5px; color:#6B6B6B; margin-bottom:14px; line-height:1.5;">Nota abaixo de 6,0 libera uma missão. Escolha uma opção e o dia que quer apresentar — o professor aprova antes de valer.</p>
-      <div class="mission-card"><h3>Opção 1 — Questões</h3><p>${MISSION_TYPES.questoes.desc}</p><div class="mission-reward">+2 mol-edas · entendimento parcial +0,5 · explicação clara +1,0</div><button class="btn btn-dark" onclick="openDatePicker('questoes')">Escolher o dia</button></div>
-      <div class="mission-card"><h3>Opção 2 — Mini apresentação</h3><p>${MISSION_TYPES.apresentacao.desc}</p><div class="mission-reward">+2 mol-edas · entendimento parcial +0,5 · explicação clara +1,0</div><button class="btn btn-dark" onclick="openDatePicker('apresentacao')">Escolher o dia</button></div>`;
+      <p style="font-size:12.5px; color:#6B6B6B; margin-bottom:14px; line-height:1.5;">Você tem ${eligibleNotes.length} ${eligibleNotes.length === 1 ? 'nota abaixo' : 'notas abaixo'} de 6,0. Escolha a missão e a nota que quer melhorar; depois selecione o dia. O professor aprova antes de valer.</p>
+      <div class="mission-card"><h3>Opção 1 — Questões</h3><p>${MISSION_TYPES.questoes.desc}</p><div class="mission-reward">+2 mol-edas · entendimento parcial +0,5 · explicação clara +1,0</div><button class="btn btn-dark" onclick="openMissionNotePicker('questoes')">Escolher uma nota</button></div>
+      <div class="mission-card"><h3>Opção 2 — Mini apresentação</h3><p>${MISSION_TYPES.apresentacao.desc}</p><div class="mission-reward">+2 mol-edas · entendimento parcial +0,5 · explicação clara +1,0</div><button class="btn btn-dark" onclick="openMissionNotePicker('apresentacao')">Escolher uma nota</button></div>`;
   }
 
   const queueTitle = document.createElement('div');
@@ -1813,14 +1822,42 @@ function renderMissao(){
   renderMissionOrderList('missaoQueueBox', room);
 }
 
-async function requestMission(type, presentationDate){
+function missionNoteLabel(student, noteId){
+  const index = (student.notaHistory || []).findIndex(entry => String(entry.id) === String(noteId));
+  return index < 0 ? 'nota não encontrada' : provaLabel(student, index) + ' · ' + formatNotaComBonus(student.notaHistory[index].nota, student.notaHistory[index].bonus);
+}
+
+function openMissionNotePicker(type){
+  const me = getMe();
+  const eligible = (me?.notaHistory || []).map((entry, index)=>({entry,index}))
+    .filter(({entry})=>Number(entry.nota) + (Number(entry.bonus)||0) < 6);
+  if(!eligible.length){ showToast('Você não tem nota abaixo de 6,0 para escolher'); return; }
+  document.getElementById('notaPickerTitle').textContent = 'Qual nota você quer melhorar?';
+  const list = document.getElementById('notaPickerList');
+  list.innerHTML = eligible.map(({entry,index})=>`
+    <button onclick="chooseMissionNote('${type}', ${JSON.stringify(String(entry.id))})" style="display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left; background:var(--gray-light); color:var(--text-primary); border:none; padding:13px 14px; border-radius:14px; font-family:inherit; margin-bottom:8px; cursor:pointer;">
+      <span style="font-size:13px; font-weight:600;">${provaLabel(me,index)}<span style="display:block; font-size:10.5px; color:var(--gray); font-weight:500;">${entry.date}</span></span>
+      <span style="font-family:'Space Grotesk', sans-serif; font-weight:700; color:var(--orange);">${formatNotaComBonus(entry.nota,entry.bonus)}</span>
+    </button>`).join('');
+  document.getElementById('notaPickerOverlay').style.display = 'flex';
+}
+
+function chooseMissionNote(type, noteId){
+  closeNotaPicker();
+  openDatePicker(type, noteId);
+}
+
+async function requestMission(type, presentationDate, targetNoteId){
   const me = getMe(); if(!me) return;
   const room = rooms[state.roomCode];
+  const normalizedTargetNoteId = Number(targetNoteId);
+  const target = (me.notaHistory || []).find(entry=>Number(entry.id) === normalizedTargetNoteId);
+  if(!target || Number(target.nota) + (Number(target.bonus)||0) >= 6){ showToast('Escolha uma nota que esteja abaixo de 6,0'); return; }
   if(countMissionsOnDate(room, presentationDate) >= MAX_PER_DAY){ showToast('Esse dia já está lotado — escolhe outro'); return; }
-  const mission = { type, presentationDate, status:'pendente', requestedAt: Date.now() };
+  const mission = { type, presentationDate, targetNoteId:normalizedTargetNoteId, status:'pendente', requestedAt: Date.now() };
   if(room?.isCloud){
     if(me.mission){ showToast('Você já tem uma missão em andamento'); return; }
-    const activity = {label:'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + formatDateFriendly(presentationDate), amount:0, pos:true, icon:'🎯', ts:Date.now()};
+    const activity = {label:'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + missionNoteLabel(me,targetNoteId) + ' · ' + formatDateFriendly(presentationDate), amount:0, pos:true, icon:'🎯', ts:Date.now()};
     me.mission = mission;
     closeDatePicker();
     renderMissao(); renderHome();
@@ -1842,18 +1879,20 @@ async function requestMission(type, presentationDate){
     return;
   }
   me.mission = mission;
-  logActivity(me, 'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + formatDateFriendly(presentationDate), 0, '🎯');
+  logActivity(me, 'Missão solicitada: ' + MISSION_TYPES[type].title + ' · ' + missionNoteLabel(me,targetNoteId) + ' · ' + formatDateFriendly(presentationDate), 0, '🎯');
   showToast('Solicitação enviada pro professor');
   closeDatePicker();
   renderMissao(); renderHome();
 }
 
 let datePickerType = null;
+let datePickerTargetNoteId = null;
 let calViewYear, calViewMonth; // mês sendo exibido no calendário (0-indexado)
 let calSelectedKey = null;
 
-function openDatePicker(type){
+function openDatePicker(type, targetNoteId = null){
   datePickerType = type;
+  datePickerTargetNoteId = targetNoteId;
   calSelectedKey = null;
   const today = new Date();
   calViewYear = today.getFullYear();
@@ -1970,7 +2009,7 @@ function renderCalendar(){
 
 function confirmDatePicker(){
   if(!calSelectedKey) return;
-  requestMission(datePickerType, calSelectedKey);
+  requestMission(datePickerType, calSelectedKey, datePickerTargetNoteId);
 }
 
 /* =====================================================================
@@ -2468,7 +2507,7 @@ function renderTeacher(){
       const div = document.createElement('div');
       div.className = 'teacher-mission-alert';
       div.style.borderColor = 'rgba(63,182,95,.35)'; div.style.background = 'rgba(63,182,95,.08)'; div.style.flexDirection = 'column'; div.style.alignItems = 'stretch';
-      div.innerHTML = `<p style="margin-bottom:4px; flex:unset;">${s.nome} — ${MISSION_TYPES[s.mission.type].title} · 📅 ${formatDateFriendly(s.mission.presentationDate)} (autorizada)</p>
+      div.innerHTML = `<p style="margin-bottom:4px; flex:unset;">${s.nome} — ${MISSION_TYPES[s.mission.type].title} · ${missionNoteLabel(s,s.mission.targetNoteId)} · 📅 ${formatDateFriendly(s.mission.presentationDate)} (autorizada)</p>
         <p style="font-size:11px; color:var(--gray); margin-bottom:8px; flex:unset;">Quanto melhorou a nota?</p>
         <div style="display:flex; gap:6px;">
           <button style="flex:1; background:#8A8A8A;" onclick="completeMission('${s.matricula}', 0)">Sem melhoria</button>
@@ -2503,7 +2542,7 @@ function renderTeacher(){
     queue.forEach((s,i)=>{
       const div = document.createElement('div');
       div.className = 'teacher-mission-alert';
-      div.innerHTML = `<p>${s.nome} pediu <b>${MISSION_TYPES[s.mission.type].title}</b> · 📅 ${formatDateFriendly(s.mission.presentationDate)}</p>
+      div.innerHTML = `<p>${s.nome} pediu <b>${MISSION_TYPES[s.mission.type].title}</b> para melhorar <b>${missionNoteLabel(s,s.mission.targetNoteId)}</b> · 📅 ${formatDateFriendly(s.mission.presentationDate)}</p>
         <button onclick="authorizeMission('${s.matricula}')">Autorizar</button>
         <button style="background:var(--red); margin-left:6px;" onclick="rejectMission('${s.matricula}')">Recusar</button>`;
       alerts.appendChild(div);
@@ -2972,19 +3011,16 @@ function completeMission(matricula, bonusValue){
   const s = room.students.find(x=>x.matricula===matricula);
   if(!s || !s.mission || s.mission.status !== 'autorizada') return;
   const missionTitle = MISSION_TYPES[s.mission.type].title;
+  const targetNoteId = s.mission.targetNoteId;
+  const targetNote = (s.notaHistory || []).find(entry=>String(entry.id) === String(targetNoteId));
+  if(bonusValue > 0 && !targetNote){ showToast('A nota escolhida não foi encontrada; a recompensa não foi aplicada.'); return; }
   s.coins += 2;
   if(bonusValue > 0){
-    let latest = getLatestNota(s);
-    if(!latest){
-      // aluno ainda não tinha nenhuma nota lançada (nota 0 implícita) — cria um registro pra guardar o bônus
-      latest = { id: Date.now()+Math.random(), nota: 0, date: 'Antes da 1ª nota lançada', mol: 0, bonus: 0 };
-      s.notaHistory.unshift(latest);
-    }
-    latest.bonus = (latest.bonus||0) + bonusValue;
+    targetNote.bonus = (targetNote.bonus||0) + bonusValue;
   }
   s.mission = null;
   const bonusText = bonusValue > 0 ? (' · +' + bonusValue.toFixed(1) + ' na nota') : '';
-  logActivity(s, 'Missão concluída: ' + missionTitle + bonusText, 2, '✅');
+  logActivity(s, 'Missão concluída: ' + missionTitle + ' · ' + missionNoteLabel(s,targetNoteId) + bonusText, 2, '✅');
   renderTeacher();
   showToast('Missão concluída · +2 mol-edas' + bonusText + ' · ' + s.nome);
 }
