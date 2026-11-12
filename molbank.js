@@ -51,10 +51,10 @@ const STORE_ITEMS = [
   {group:'Ajuda durante a prova', name:'Verificação', desc:'Confirma se está certo ou errado. Pode tentar de novo.', cost:8, icon:'🔍'},
   {group:'Ajuda durante a prova', name:'Assistida', desc:'Recebe orientação no raciocínio. Questão passa a valer 75%.', cost:10, icon:'🧭'},
   {group:'Ajuda durante a prova', name:'Travamento', desc:'Para quando não sabe fazer. Questão passa a valer 75%.', cost:12, icon:'🔓'},
-  {group:'Aumento de nota', name:'+0,5 ponto', desc:'Só pode ser paga uma pontuação por vez.', cost:15, icon:'📈', bonusValue:0.5},
-  {group:'Aumento de nota', name:'+1,0 ponto', desc:'Só pode ser paga uma pontuação por vez.', cost:25, icon:'📈', bonusValue:1.0},
-  {group:'Aumento de nota', name:'+1,5 ponto', desc:'Só pode ser paga uma pontuação por vez.', cost:35, icon:'📈', bonusValue:1.5},
-  {group:'Aumento de nota', name:'+2,0 pontos', desc:'Só pode ser paga uma pontuação por vez.', cost:50, icon:'📈', bonusValue:2.0},
+  {group:'Aumento de nota', name:'+0,5 ponto', desc:'Peça ao professor para aplicar o aumento em uma nota.', cost:15, icon:'📈', bonusValue:0.5},
+  {group:'Aumento de nota', name:'+1,0 ponto', desc:'Peça ao professor para aplicar o aumento em uma nota.', cost:25, icon:'📈', bonusValue:1.0},
+  {group:'Aumento de nota', name:'+1,5 ponto', desc:'Peça ao professor para aplicar o aumento em uma nota.', cost:35, icon:'📈', bonusValue:1.5},
+  {group:'Aumento de nota', name:'+2,0 pontos', desc:'Peça ao professor para aplicar o aumento em uma nota.', cost:50, icon:'📈', bonusValue:2.0},
   {group:'Surpresa', name:'Brinde surpresa', desc:'Recompensa misteriosa da professor(a).', cost:20, icon:'🎁'},
 ];
 
@@ -1073,17 +1073,16 @@ function watchCloudStoreBonusRequests(code){
         type:'compra', matricula:request.memberUid, nome:request.studentName,
         detail:request.itemName, cost:request.cost, time:requestTime(request),
       }));
-    const latestByStudent = new Map();
-    requests.filter(request=>request.requestType === 'bonus' || !request.requestType)
+    const pendingBonusByStudent = new Map();
+    requests.filter(request=>(request.requestType === 'bonus' || !request.requestType) && request.status === 'pendente')
       .sort((a,b)=>requestTime(b)-requestTime(a)).forEach(request=>{
-      if(!latestByStudent.has(request.memberUid)) latestByStudent.set(request.memberUid, request);
+      if(!pendingBonusByStudent.has(request.memberUid)) pendingBonusByStudent.set(request.memberUid, request);
     });
     room.students.forEach(student=>{
       student.storePendingPurchases = requests.filter(request=>request.memberUid === student.uid
         && request.requestType === 'purchase' && request.status === 'pendente');
-      const request = latestByStudent.get(student.uid);
-      if(!request || request.status === 'rejeitado'
-        || (request.status === 'aplicado' && student.notaHistory?.[0]?.id !== request.latestNoteId)){
+      const request = pendingBonusByStudent.get(student.uid);
+      if(!request){
         student.storeBonusActive = null;
         return;
       }
@@ -1092,7 +1091,7 @@ function watchCloudStoreBonusRequests(code){
         entryId: request.entryId,
         value: request.value,
         cost: request.cost,
-        status: request.status === 'aplicado' ? 'aplicado' : 'pendente',
+        status: 'pendente',
         requestedAt: request.createdAt,
       };
     });
@@ -1639,7 +1638,7 @@ function renderStore(){
       content.appendChild(label); lastGroup = item.group;
     }
     const isBonusItem = item.bonusValue !== undefined;
-    const blockedByExistingBonus = isBonusItem && !!me.storeBonusActive;
+    const blockedByExistingBonus = isBonusItem && me.storeBonusActive?.status === 'pendente';
     const blockedByNoHistory = isBonusItem && (!me.notaHistory || me.notaHistory.length === 0);
     const pendingItem = (me.storePendingPurchases || []).some(request=>request.status === 'pendente' && request.itemName === item.name);
     const canBuy = me.coins >= item.cost && !blockedByExistingBonus && !blockedByNoHistory && !pendingItem;
@@ -1655,7 +1654,7 @@ async function buyItem(idx){
   const isBonusItem = item.bonusValue !== undefined;
 
   if(isBonusItem){
-    if(me.storeBonusActive){ showToast('Você já tem um aumento em andamento'); return; }
+    if(me.storeBonusActive?.status === 'pendente'){ showToast('Você já tem um aumento aguardando aprovação'); return; }
     if(!me.notaHistory || me.notaHistory.length === 0){ showToast('Ainda não tem nenhuma nota lançada'); return; }
     openNotaPicker(idx);
     return;
@@ -3098,7 +3097,7 @@ async function approveBonus(matricula){
   }
   const entry = s.notaHistory.find(h=>h.id === s.storeBonusActive.entryId);
   if(entry) entry.bonus = (entry.bonus||0) + s.storeBonusActive.value;
-  s.storeBonusActive.status = 'aplicado';
+  s.storeBonusActive = null;
   logActivity(s, 'Aumento de nota aprovado: +' + s.storeBonusActive.value.toFixed(1), 0, '📈');
   renderTeacher();
   showToast('Aumento aprovado para ' + s.nome);
@@ -3133,7 +3132,7 @@ async function approveStoreRequest(requestId){
       const entry = targetStudent.notaHistory.find(item=>item.id === request.entryId);
       if(!entry){ showToast('A nota selecionada não existe mais.'); return; }
       entry.bonus = (entry.bonus || 0) + Number(request.value);
-      targetStudent.storeBonusActive = {...targetStudent.storeBonusActive, status:'aplicado'};
+      targetStudent.storeBonusActive = null;
     }
     request.status = 'aplicado';
     renderTeacher();
@@ -3158,7 +3157,7 @@ async function approveStoreRequest(requestId){
     const api = await firebaseApi();
     await api.resolveStoreBonusRequest(state.teacherRoomCode, request.id, targetStudent.uid, progress, 'aplicado');
     request.status = 'aplicado';
-    if(progress) Object.assign(targetStudent, progress, {storeBonusActive:{...targetStudent.storeBonusActive, status:'aplicado'}});
+    if(progress) Object.assign(targetStudent, progress, {storeBonusActive:null});
     renderTeacher();
     showToast(request.requestType === 'bonus' ? 'Aumento de nota aprovado para ' + targetStudent.nome : 'Resgate aprovado para ' + targetStudent.nome);
   }catch(error){
