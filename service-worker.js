@@ -1,4 +1,4 @@
-const CACHE_NAME = 'molbank-shell-v3';
+const CACHE_NAME = 'molbank-shell-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,7 +8,8 @@ const APP_SHELL = [
   './jsQR.js',
   './manifest.webmanifest',
   './assets/molbank-icon-192.png',
-  './assets/molbank-icon-512.png'
+  './assets/molbank-icon-512.png',
+  './assets/apple-touch-icon-180.png'
 ];
 
 self.addEventListener('install', (event) => {
